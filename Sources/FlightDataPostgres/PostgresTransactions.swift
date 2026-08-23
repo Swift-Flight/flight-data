@@ -139,6 +139,36 @@ public final class PostgresTransactionCoordinator: FlightTransactionCoordinator,
         let level: Int
     }
 
+    /// Whether this coordinator currently holds an open transaction on
+    /// `connection`.
+    ///
+    /// The seam a scoped `Repo` needs. Hangar cannot ask a `PostgresConnection`
+    /// whether it is inside a transaction — PostgresNIO does not expose the
+    /// protocol's transaction status — so a repo bound to a connection that is
+    /// already in one would emit a literal `BEGIN`/`COMMIT` and its `COMMIT`
+    /// would end the enclosing transaction, making work the caller intended to
+    /// roll back durable.
+    ///
+    /// The coordinator does know, because it opened it.
+    public func isTransactionOpen(on connection: PostgresConnection) -> Bool {
+        let connectionID = ObjectIdentifier(connection)
+        return state.withLock { state in
+            // Written as an explicit `guard let`, not
+            // `state.connections[connectionID]?.depth ?? 0 > 0`. Swift 6.2.3
+            // on Linux miscompiles `dictionary[key]?.field ?? default` in
+            // -Onone builds when the value is a multi-field struct: the
+            // missing-key path reads uninitialized memory instead of the
+            // default, so a lookup that misses reports a garbage depth and
+            // this method answers "yes, in a transaction" for a connection
+            // that is not. Every scoped Repo then nests as a savepoint with
+            // no enclosing BEGIN — Postgres 25P01, on the first write of
+            // every request. Release builds are unaffected, which is what
+            // makes it worth a comment rather than a silent rewrite.
+            guard let entry = state.connections[connectionID] else { return false }
+            return entry.depth > 0
+        }
+    }
+
     /// Resolves the ambient scope's connection and computes the nesting
     /// level — everything `begin()` does except the control statement itself.
     private func prepareBegin() throws -> BeginContext {
@@ -204,7 +234,8 @@ public final class PostgresTransactionCoordinator: FlightTransactionCoordinator,
             guard let frame = state.frames.removeValue(forKey: token.id) else {
                 throw PostgresTransactionError.unknownToken(token.id)
             }
-            let depth = state.connections[frame.connectionID]?.depth ?? 0
+            // Same -Onone miscompile as isTransactionOpen — see the comment there.
+            let depth = state.connections[frame.connectionID].map { $0.depth } ?? 0
             if expectInnermost && depth != frame.level + 1 {
                 throw PostgresTransactionError.misorderedCompletion(
                     tokenLevel: frame.level, openDepth: depth)

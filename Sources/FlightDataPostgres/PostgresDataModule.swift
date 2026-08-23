@@ -8,7 +8,7 @@ import ServiceLifecycle
 /// datasource, exactly as `InMemoryDataModule<Name>` models it —
 ///
 /// ```swift
-/// try await bootstrap(configuration: .load(), modules: [
+/// try await Flight.bootstrap(configuration: .load(), modules: [
 ///     PostgresDataModule<PrimaryDataSource>.self,
 ///     PostgresDataModule<Analytics>.self,
 /// ])

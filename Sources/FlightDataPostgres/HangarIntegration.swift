@@ -45,7 +45,15 @@ extension PostgresDataModule {
             let connection = try container.resolveInActiveScope(
                 ScopedConnection<PostgresDataSource>.self, qualifier: name
             ).connection
-            return Repo(connection: connection)
+            // If a @Transactional method already opened a transaction on this
+            // connection, the repo must nest as a savepoint. Told otherwise it
+            // would emit a literal BEGIN/COMMIT, and that COMMIT would end the
+            // enclosing transaction — making writes the caller intended to roll
+            // back durable instead. Hangar cannot detect this itself; the
+            // coordinator can, because it opened it.
+            let coordinator = try? container.resolve(PostgresTransactionCoordinator.self)
+            let inTransaction = coordinator?.isTransactionOpen(on: connection) ?? false
+            return Repo(connection: connection, inTransaction: inTransaction)
         }
         container.register(Repo.self, qualifier: name, scope: .scoped, factory: factory)
         if name == PrimaryDataSource.name {
