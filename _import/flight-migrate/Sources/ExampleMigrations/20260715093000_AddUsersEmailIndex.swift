@@ -1,0 +1,17 @@
+import FlightMigrate
+
+// The design document's unwrapped example: CREATE INDEX CONCURRENTLY cannot
+// run inside a transaction block, so this migration opts out of the wrapper. One
+// statement per direction — a partial failure here cannot auto-rollback.
+struct AddUsersEmailIndex: Migration {
+    // This migration cannot run in a transaction: Postgres refuses CONCURRENTLY there.
+    static let wrapInTransaction = false
+
+    func up(_ schema: SchemaBuilder) {
+        schema.raw("CREATE INDEX CONCURRENTLY idx_users_email ON users (email)")
+    }
+
+    func down(_ schema: SchemaBuilder) {
+        schema.raw("DROP INDEX CONCURRENTLY idx_users_email")
+    }
+}
