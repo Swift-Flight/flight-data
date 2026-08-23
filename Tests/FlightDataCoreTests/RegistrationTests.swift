@@ -3,9 +3,9 @@ import FlightCore
 import FlightDataCore
 import FlightDataTesting
 
-/// The three components `register(dataSource:)` promises (§3, §5), and the
-/// qualifier discipline that makes named datasources work (§4).
-@Suite("register(dataSource:) (§3–§5)")
+/// The three components `register(dataSource:)` promises, and the
+/// qualifier discipline that makes named datasources work.
+@Suite("register(dataSource:)")
 struct RegistrationTests {
 
     @Test("the instance form registers pool, scoped connection, and liveness — all name-qualified")
@@ -72,7 +72,7 @@ struct RegistrationTests {
         #expect((primary.poolSize, analytics.poolSize) == (1, 3))
     }
 
-    @Test("liveness pings through to the pool (§5)")
+    @Test("liveness pings through to the pool")
     func livenessProbe() async throws {
         struct StoreDown: Error {}
         let source = InMemoryDataSource(poolSize: 1)
@@ -87,7 +87,7 @@ struct RegistrationTests {
         await #expect(throws: StoreDown.self) { try await liveness.ping() }
     }
 
-    @Test("DataSourceLiveness.all discovers every datasource, store-unseen (§5)")
+    @Test("DataSourceLiveness.all discovers every datasource, store-unseen")
     func livenessDiscovery() throws {
         let container = Container()
         container.register(dataSource: InMemoryDataSource(name: "primary", poolSize: 1))

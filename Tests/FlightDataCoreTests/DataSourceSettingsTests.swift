@@ -2,8 +2,8 @@ import Testing
 import FlightCore
 import FlightDataCore
 
-/// §4 — the one shared key convention that lets multiple stores coexist.
-@Suite("Configuration conventions (§4)")
+/// — the one shared key convention that lets multiple stores coexist.
+@Suite("Configuration conventions")
 struct DataSourceSettingsTests {
 
     @Test("the convention keys spell datasource.<name>.<suffix>")
@@ -39,7 +39,7 @@ struct DataSourceSettingsTests {
         #expect((primary.poolSize, analytics.poolSize) == (10, 4))
     }
 
-    @Test("a missing url fails loudly with the key named (§4: at bootstrap, not first query)")
+    @Test("a missing url fails loudly with the key named (at bootstrap, not first query)")
     func missingURL() {
         let configuration = Configuration(values: [:])
         #expect {

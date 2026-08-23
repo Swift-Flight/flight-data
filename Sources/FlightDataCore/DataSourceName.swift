@@ -1,9 +1,9 @@
-/// A compile-time datasource name (§4).
+/// A compile-time datasource name.
 ///
 /// Named datasources are the mechanism for multiple stores (or multiple
 /// databases of the same store): a store package's `FlightModule` is
 /// instantiated per named datasource, registering its components under a qualifier
-/// matching the name. `FlightModule` requires `init()` (Flight Core §4), so
+/// matching the name. `FlightModule` requires `init()` (Flight Core), so
 /// the name cannot be passed to a module instance — it is carried in the
 /// module's *type* instead, exactly as `FlightWebModule<Transport>` carries
 /// its transport:
@@ -29,7 +29,7 @@ public protocol DataSourceName {
     static var name: String { get }
 }
 
-/// The conventional default datasource (§4's `primary`). Apps with one
+/// The conventional default datasource (`primary`). Apps with one
 /// database never need to define their own `DataSourceName`.
 public enum PrimaryDataSource: DataSourceName {
     public static let name = "primary"

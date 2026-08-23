@@ -1,7 +1,7 @@
 import FlightCore
 import Foundation
 
-/// The §4 configuration key convention, in one place. Every store package
+/// The configuration key convention, in one place. Every store package
 /// reads its settings under `datasource.<name>.…` so multiple stores can
 /// coexist in one `flight.yaml`:
 ///
@@ -42,15 +42,15 @@ public enum DataSourceConfigKey {
     }
 }
 
-/// The store-agnostic slice of a named datasource's configuration (§4),
+/// The store-agnostic slice of a named datasource's configuration,
 /// resolved once at bootstrap.
 ///
-/// Per §4, absence fails loudly at bootstrap, not silently at first query:
+/// Per, absence fails loudly at bootstrap, not silently at first query:
 /// `load` runs inside a module's registered factory, so a missing
 /// `datasource.<name>.url` surfaces as `ConfigError.missingKey` during
 /// `freeze()`'s eager singleton construction — before any request is served.
-/// (The *compile-time* half of §4's validation belongs to `@ConfigValue`
-/// sites and the build plugin, exactly as in Flight Config §5.)
+/// (The *compile-time* half of validation belongs to `@ConfigValue`
+/// sites and the build plugin, exactly as in Flight Config)
 public struct DataSourceSettings: Sendable, Equatable {
     /// Applied when `datasource.<name>.pool_size` is absent from every source.
     public static let defaultPoolSize = 10
@@ -80,7 +80,7 @@ public struct DataSourceSettings: Sendable, Equatable {
     /// - `url` is required: absent from every source throws
     ///   `ConfigError.missingKey` naming the key and active environment.
     /// - `pool_size` is optional with `defaultPoolSize`; present-but-malformed
-    ///   throws rather than silently applying the default (Flight Config §5).
+    ///   throws rather than silently applying the default (Flight Config).
     public static func load(
         name: String = PrimaryDataSource.name,
         from configuration: Configuration

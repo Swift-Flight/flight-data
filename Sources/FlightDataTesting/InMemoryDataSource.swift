@@ -1,7 +1,7 @@
 import FlightDataCore
 import Synchronization
 
-/// A connection backed by nothing (§7). Reference semantics on purpose:
+/// A connection backed by nothing. Reference semantics on purpose:
 /// scoping tests assert connection *identity* (`===`) — "same connection
 /// within one scope" is the property under test.
 public final class InMemoryConnection: Sendable {
@@ -20,7 +20,7 @@ public final class InMemoryConnection: Sendable {
     }
 
     /// Records one unit of pretend work. A test double's observation hook —
-    /// deliberately *not* a query API (§1); there is nothing behind it but
+    /// deliberately *not* a query API; there is nothing behind it but
     /// this list.
     public func perform(_ work: String) {
         journalStorage.withLock { $0.append(work) }
@@ -33,7 +33,7 @@ public final class InMemoryConnection: Sendable {
     }
 }
 
-/// A `DataSource` conformance backed by nothing (§7) — real pool semantics
+/// A `DataSource` conformance backed by nothing — real pool semantics
 /// (bounded size, checkout/release accounting, close), no store behind it.
 /// Useful for verifying scoping and lifecycle without a live database; store
 /// packages provide their own integration-test support against real servers.
@@ -129,7 +129,7 @@ public final class InMemoryDataSource: DataSource, Sendable {
 
     // MARK: - Test introspection
 
-    /// Connections currently checked out. The §3 assertion "scope close
+    /// Connections currently checked out. The assertion "scope close
     /// returned the connection" is `activeCheckouts == 0` after `withScope`.
     public var activeCheckouts: Int {
         state.withLock { $0.checkedOut.count }

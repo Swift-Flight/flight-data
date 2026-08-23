@@ -1,7 +1,7 @@
 import FlightDataCore
 
 extension InMemoryConnection {
-    /// The §5 driver obligation, in miniature: one `apply(_:)` translating
+    /// The driver obligation, in miniature: one `apply(_:)` translating
     /// the neutral `ValidatedChanges` into this "store's" native write — a
     /// journal line. Real drivers are the same handful of lines against SQL
     /// or BSON; none of them touch validation or dirty-tracking, and an

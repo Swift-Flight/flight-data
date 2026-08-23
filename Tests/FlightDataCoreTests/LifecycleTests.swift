@@ -4,10 +4,10 @@ import FlightDataCore
 import FlightDataTesting
 import ServiceLifecycle
 
-/// §5 — every store module follows one shape: configure registers the pool,
+/// — every store module follows one shape: configure registers the pool,
 /// the pool's long-running work is a Service, health falls out of bootstrap
 /// with no per-store instrumentation.
-@Suite("Module lifecycle and health (§5)")
+@Suite("Module lifecycle and health")
 struct LifecycleTests {
 
     @Test("assemble wires a store module: components registered, module .running, source stamped")
@@ -33,7 +33,7 @@ struct LifecycleTests {
         }
     }
 
-    @Test("bad datasource config fails at bootstrap, not at first query (§4)")
+    @Test("bad datasource config fails at bootstrap, not at first query")
     func configFailureAtBootstrap() {
         do {
             _ = try Flight.assemble(
@@ -53,7 +53,7 @@ struct LifecycleTests {
         }
     }
 
-    @Test("one module type, instantiated per named datasource (§4)")
+    @Test("one module type, instantiated per named datasource")
     func modulePerNamedDataSource() throws {
         let app = try Flight.assemble(
             configuration: Configuration(values: [
@@ -75,7 +75,7 @@ struct LifecycleTests {
         #expect((primary.poolSize, analytics.poolSize) == (2, 3))
     }
 
-    @Test("TestContainer honors declared module dependencies (§7)")
+    @Test("TestContainer honors declared module dependencies")
     func testContainerDependencies() throws {
         // UserRepositoryModule declares InMemoryDataModule<PrimaryDataSource>;
         // listing only the dependent module must still produce a working graph.
@@ -102,7 +102,7 @@ struct LifecycleTests {
         #expect(source.activeCheckouts == 0)
     }
 
-    @Test("a store service failure flips its module to .failed with zero instrumentation (§5)")
+    @Test("a store service failure flips its module to .failed with zero instrumentation")
     func serviceFailureHealth() async throws {
         let app = try Flight.assemble(
             configuration: Configuration(),
@@ -134,7 +134,7 @@ struct LifecycleTests {
 
 // MARK: - Service-owning fixtures
 
-/// The §5 shape: a module whose service does the pool's "long-running" work.
+/// The shape: a module whose service does the pool's "long-running" work.
 /// Bounded (.endsApp) so tests and bootstrap can run it to completion.
 final class PoolServiceModule: FlightModule {
     static var dependencies: [any FlightModule.Type] {
@@ -160,7 +160,7 @@ struct PoolService: Service {
     let container: Container
 
     func run() async throws {
-        // Post-freeze by construction (§5 bootstrap ordering): the pool
+        // Post-freeze by construction (bootstrap ordering): the pool
         // singleton exists before any service starts.
         let source = try container.resolve(InMemoryDataSource.self, qualifier: "primary")
         try await source.withConnection { $0.perform("startup probe") }

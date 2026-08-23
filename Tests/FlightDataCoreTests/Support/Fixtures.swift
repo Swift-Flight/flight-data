@@ -2,9 +2,9 @@ import FlightCore
 import FlightDataCore
 import FlightDataTesting
 
-// MARK: - The §7 repository fixture
+// MARK: - The repository fixture
 //
-// The design doc's `UserRepository`: a @Repository-stereotyped component holding
+// The canonical `UserRepository`: a @Repository-stereotyped component holding
 // its scope's connection. Hand-registered (like Core's own container tests)
 // so these results say nothing about macro correctness — the macro layer has
 // its own suites in flight-core.
@@ -40,7 +40,7 @@ struct UserRepositoryModule: FlightModule {
     }
 }
 
-// MARK: - Named datasources (§4)
+// MARK: - Named datasources
 
 enum Analytics: DataSourceName {
     static let name = "analytics"

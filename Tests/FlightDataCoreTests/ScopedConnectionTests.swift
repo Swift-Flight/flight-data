@@ -3,10 +3,10 @@ import FlightCore
 import FlightDataCore
 import FlightDataTesting
 
-/// §3 — the architecturally significant part of the package: a connection
+/// — the architecturally significant part of the package: a connection
 /// checked out per scope, with neither Flight Core nor the consumer knowing
 /// what the scope *means* (request, job, CLI invocation).
-@Suite("Scope-bound connections (§3, §7)")
+@Suite("Scope-bound connections")
 struct ScopedConnectionTests {
 
     private func makeContainer(poolSize: Int = 4) throws -> (Container, InMemoryDataSource) {
@@ -17,7 +17,7 @@ struct ScopedConnectionTests {
         return (container, source)
     }
 
-    // The design doc's §7 test, spelled against the shipped API.
+    // The canonical scoping test, spelled against the shipped API.
     @Test("a repository uses its scope's connection")
     func repositoryUsesScopedConnection() async throws {
         let container = try TestContainer.build {
@@ -80,7 +80,7 @@ struct ScopedConnectionTests {
                 ScopedConnection<InMemoryDataSource>.self, qualifier: "primary", in: scope)
             #expect(source.activeCheckouts == 1)
         }
-        #expect(source.activeCheckouts == 0, "§3: the scope's connection returns at close")
+        #expect(source.activeCheckouts == 0, "the scope's connection returns at close")
         #expect(source.availableConnections == 1, "…to the pool, not the floor")
     }
 

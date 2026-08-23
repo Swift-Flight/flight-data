@@ -1,7 +1,7 @@
 // swift-tools-version: 6.1
 // Flight Data Core — the store-agnostic parts of persistence: the DataSource
 // seam, scope-bound connection checkout, config/health/lifecycle conventions.
-// Deliberately tiny (flight-data-core-design.md §1): no query model, no
+// Deliberately tiny: no query model, no
 // transactions, no migrations — those live in each store package.
 import PackageDescription
 
@@ -13,24 +13,24 @@ let package = Package(
     ],
     products: [
         // The contract: DataSource, ScopedConnection, register(dataSource:),
-        // DataSourceSettings (§4 key conventions), DataSourceLiveness (§5).
+        // DataSourceSettings (key conventions), DataSourceLiveness.
         .library(name: "FlightDataCore", targets: ["FlightDataCore"]),
-        // Test support (§7): InMemoryDataSource — a DataSource backed by
+        // Test support: InMemoryDataSource — a DataSource backed by
         // nothing, for verifying scoping and lifecycle without a live
         // database — plus InMemoryDataModule and TestContainer.
         .library(name: "FlightDataTesting", targets: ["FlightDataTesting"]),
     ],
     dependencies: [
         // FlightCore re-exports FlightConfig, so this one dependency covers
-        // both the design doc's "Depends on" lines.
+        // both dependencies this package actually has.
         .package(path: "../../Core/flight-core"),
         // Changeset/ValidatedChanges/TableModel live in their own
         // Flight-independent package since 2026-08-21 (extracted per
-        // hangar-design §11.2, so Hangar can consume them too);
+        // so Hangar can consume them too);
         // FlightDataCore re-exports the module (see Exports.swift).
         .package(path: "../swift-changeset"),
         // Test-target only: lifecycle tests conform fixtures to
-        // ServiceLifecycle's Service to exercise the §5 bootstrap ordering.
+        // ServiceLifecycle's Service to exercise the bootstrap ordering.
         .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.6.0"),
     ],
     targets: [

@@ -1,18 +1,18 @@
 import FlightCore
 
 extension Container {
-    /// Registers one named datasource (§3, §4, §5) — called by each store's
+    /// Registers one named datasource — called by each store's
     /// `FlightModule` from `configure(_:)`. Three components, all qualified by
     /// `name`:
     ///
     /// 1. **The pool** — `D` as `.singleton`. `factory` runs at `freeze()`
-    ///    (Flight Core §2.1's eager singleton construction), which is where
+    ///    (Flight Core's eager singleton construction), which is where
     ///    it reads `Configuration` — module `configure` bodies run during the
     ///    registration phase, where resolution is not yet legal.
     /// 2. **The scope-bound connection** — `ScopedConnection<D>` as
     ///    `.scoped`. First resolution within a `Scope` checks a connection
     ///    out of the pool; every further resolution in that scope yields the
-    ///    same one; scope close returns it (§3). A repository factory reaches
+    ///    same one; scope close returns it. A repository factory reaches
     ///    it with `resolveInActiveScope` (Flight Core delta 11):
     ///
     ///    ```swift
@@ -23,11 +23,11 @@ extension Container {
     ///    ```
     ///
     /// 3. **The liveness probe** — `DataSourceLiveness` as `.singleton`,
-    ///    wrapping the pool's `ping()` for Actuator (§5).
+    ///    wrapping the pool's `ping()` for Actuator.
     ///
     /// Names are always explicit qualifiers, including `"primary"` — one
     /// convention whether an app has one datasource or five; resolution
-    /// disambiguates the same way any multi-binding does (Flight Core §5.4).
+    /// disambiguates the same way any multi-binding does (Flight Core).
     public func register<D: DataSource>(
         dataSource type: D.Type,
         name: String = PrimaryDataSource.name,

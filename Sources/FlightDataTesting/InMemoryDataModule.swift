@@ -1,19 +1,19 @@
 import FlightCore
 import FlightDataCore
 
-/// The reference store module (§5, §7): the exact shape every real store
+/// The reference store module: the exact shape every real store
 /// package's `FlightModule` follows, minus the parts that need a real store.
 ///
 /// - `configure(_:)` registers the datasource (pool as singleton, scoped
 ///   connection, liveness probe) via `register(dataSource:name:factory:)`.
 ///   The factory body — where `Configuration` is read — runs at `freeze()`,
 ///   after config resolves and before any service starts, so a bad
-///   configuration fails bootstrap, not the first query (§4, §5).
+///   configuration fails bootstrap, not the first query.
 /// - `service` is nil: an in-memory pool has no long-running work. A real
 ///   store module returns its pool's service here and bootstrap ordering
-///   guarantees no request is served before the pool is live (§5).
+///   guarantees no request is served before the pool is live.
 ///
-/// The name is carried in the type (§4): one module type instantiation per
+/// The name is carried in the type: one module type instantiation per
 /// named datasource —
 ///
 /// ```swift
@@ -23,7 +23,7 @@ import FlightDataCore
 /// ```
 ///
 /// Configuration is optional for the in-memory store — it is "backed by
-/// nothing" (§7), so there is no URL to require; `datasource.<name>.pool_size`
+/// nothing", so there is no URL to require; `datasource.<name>.pool_size`
 /// is honored when present and defaults to 4 connections. Real store modules
 /// load `DataSourceSettings` instead, whose `url` is required.
 public final class InMemoryDataModule<Name: DataSourceName>: FlightModule {

@@ -12,16 +12,16 @@ directly; Flight Data Postgres does not use them at all, because Hangar sits
 above it and consumes changesets itself. A driver is free to ignore the
 changeset layer entirely.
 
-Deliberately tiny. The design doc's anti-goals are load-bearing and this
+Deliberately tiny. The anti-goals below are load-bearing and this
 package honors them by *absence*:
 
-- **No universal query API** (§1) — SQL joins, Mongo pipelines, and Redis
+- **No universal query API** — SQL joins, Mongo pipelines, and Redis
   commands are not reconcilable; a lowest-common-denominator would destroy
   Flight Data Postgres's compile-time-checked queries.
-- **No shared transaction abstraction** (§6) — `@Transactional` is defined in
+- **No shared transaction abstraction** — `@Transactional` is defined in
   Flight Data Postgres, on top of the one thing that *is* shared: scope-bound
   connection checkout.
-- **No migrations, no ORM concepts, no caching layer** (§8).
+- **No migrations, no ORM concepts, no caching layer**.
 
 ## Build status
 
@@ -37,12 +37,12 @@ Dependencies are Flight Core, swift-changeset, and swift-service-lifecycle.
 
 | Product | Contents |
 |---|---|
-| `FlightDataCore` | `DataSource` (the entire cross-store contract: `checkout`/`release`, derived `withConnection`, `ping`), `ScopedConnection` (the `.scoped` lease component), `Container.register(dataSource:)`, `DataSourceName`/`PrimaryDataSource`, `DataSourceSettings` + `DataSourceConfigKey` (§4 key conventions), `DataSourceLiveness` (§5 Actuator surface), `DataSourceError` — plus the changeset layer: `Changeset<Model>`, `ValidationRule`/`CrossFieldRule`, `ValidatedChanges`/`ChangesetError`, and the `TableModel`/`TableColumn` metadata seam |
-| `FlightDataTesting` | `InMemoryDataSource` (§7: a `DataSource` backed by nothing — real pool semantics, no store), `InMemoryDataModule<Name>` (the reference store module), `TestContainer`, and `InMemoryConnection.apply(_:to:)` (the changeset design's §5 driver translation, in miniature) |
+| `FlightDataCore` | `DataSource` (the entire cross-store contract: `checkout`/`release`, derived `withConnection`, `ping`), `ScopedConnection` (the `.scoped` lease component), `Container.register(dataSource:)`, `DataSourceName`/`PrimaryDataSource`, `DataSourceSettings` + `DataSourceConfigKey` (key conventions), `DataSourceLiveness` (the Actuator surface), `DataSourceError` — plus the changeset layer: `Changeset<Model>`, `ValidationRule`/`CrossFieldRule`, `ValidatedChanges`/`ChangesetError`, and the `TableModel`/`TableColumn` metadata seam |
+| `FlightDataTesting` | `InMemoryDataSource` (a `DataSource` backed by nothing — real pool semantics, no store), `InMemoryDataModule<Name>` (the reference store module), `TestContainer`, and `InMemoryConnection.apply(_:to:)` (the changeset design's driver translation, in miniature) |
 
 ## Using it
 
-A store package's `FlightModule` follows one shape (§5) — `InMemoryDataModule`
+A store package's `FlightModule` follows one shape — `InMemoryDataModule`
 is the reference implementation:
 
 ```swift
@@ -51,7 +51,7 @@ public final class PostgresDataModule<Name: DataSourceName>: FlightModule {
 
     public func configure(_ container: Container) throws {
         // The factory runs at freeze(), where Configuration is readable —
-        // a bad config fails bootstrap, never the first query (§4).
+        // a bad config fails bootstrap, never the first query.
         container.register(dataSource: PostgresDataSource.self, name: Name.name) { c in
             let settings = try DataSourceSettings.load(name: Name.name,
                                                        from: c.resolve(Configuration.self))
@@ -59,12 +59,12 @@ public final class PostgresDataModule<Name: DataSourceName>: FlightModule {
         }
     }
 
-    public var service: (any Service)? { /* the pool's long-running task (§5) */ }
+    public var service: (any Service)? { /* the pool's long-running task */ }
 }
 ```
 
 `register(dataSource:name:)` registers three components, all qualified by the
-datasource's name (§4): the pool (`.singleton`), the scope-bound connection
+datasource's name: the pool (`.singleton`), the scope-bound connection
 (`ScopedConnection<D>`, `.scoped`), and the liveness probe
 (`DataSourceLiveness`, for Actuator).
 
@@ -102,13 +102,13 @@ container.register(UserRepository.self, scope: .scoped, stereotype: .repository)
 }
 ```
 
-The §3 property this buys: "request-scoped connection" is not a feature this
+The property this buys: "request-scoped connection" is not a feature this
 package implements — it is what falls out when Flight Web opens a `Scope` per
 request and the connection is registered `.scoped`. A job runner or CLI
 command gets the same correct lifetime, and none of the packages know about
 each other.
 
-Testing (§7) needs no live database and no `ServiceGroup`:
+Testing needs no live database and no `ServiceGroup`:
 
 ```swift
 let container = try TestContainer.build { InMemoryDataModule<PrimaryDataSource>() }
@@ -161,7 +161,7 @@ checkout after shutdown is refused.
 
 ## Changesets
 
-The thin layer (changeset design §2): semantic validation and dirty tracking
+The thin layer (changeset design): semantic validation and dirty tracking
 only — type casting stays with Swift/`Codable`, field existence stays with
 keypaths. Errors accumulate; an invalid changeset structurally cannot reach a
 driver (`validatedChanges()` throws).
@@ -204,26 +204,26 @@ Field rules validate *recorded changes* only (unchanged data was validated
 when it was written); cross-field rules always run, against the effective
 state; nil-ness is exclusively `validateRequired`'s job.
 
-## Design deltas vs. the design doc (all deliberate, none silent)
+## Design decisions worth knowing (all deliberate, none silent)
 
 | # | Delta | Why |
 |---|-------|-----|
-| D1 | `DataSource` gains `checkout()`/`release(_:)`; `withConnection` becomes a derived default on top | Scope-bound checkout (§3) runs inside Core's *synchronous* component factories; an async-only `withConnection` cannot be bridged from a synchronous factory without blocking a cooperative-pool thread (deadlock on a single-threaded executor). §2's own escape hatch — "extend it deliberately" — invoked once. Stores whose pools can wait for a free connection override `withConnection` with their async path. |
-| D2 | The `.scoped` component is `ScopedConnection<D>` (a lease class), not the raw `Connection` | Core's `Scope` has no close hooks — close drops instances ("eligible for cleanup", Core §3). Return-to-pool therefore rides ARC: the lease's `deinit` releases the connection the moment the scope's storage drops it. A raw connection value (possibly a struct — Core has no opinion about the type, §2) has nowhere to hang that behavior. |
-| D3 | Flight Core delta 11 (`Scope.active` task-local, `resolveInActiveScope`) | The gap §3 predicted the "second consumer" would find: factories receive only the `Container`, so a scoped repository had no path to the scope's connection. Fixed in Core, where it belongs — it is Scope semantics, not data semantics. Recorded as Core delta 11 with its own test suite. |
-| D4 | `register(dataSource:)` has instance *and* factory forms, plus `name:` | Modules cannot read `Configuration` during `configure` (resolution begins at `freeze()`, Core §2.1), so the §5 "construct the DataSource from config" step happens inside a registered factory. The doc's instance form remains for tests and hand-wiring. |
-| D5 | `DataSourceLiveness` component per datasource | §5 says stores "should register a liveness check surfaced by Actuator" but names no mechanism. A qualified component wrapping `ping()`, discoverable via `DataSourceLiveness.all(in:)` through Core §6 introspection, is that mechanism — Actuator needs zero store knowledge. |
+| D1 | `DataSource` gains `checkout()`/`release(_:)`; `withConnection` becomes a derived default on top | Scope-bound checkout runs inside Core's *synchronous* component factories; an async-only `withConnection` cannot be bridged from a synchronous factory without blocking a cooperative-pool thread (deadlock on a single-threaded executor). This is the contract's own escape hatch — "extend it deliberately" — invoked once. Stores whose pools can wait for a free connection override `withConnection` with their async path. |
+| D2 | The `.scoped` component is `ScopedConnection<D>` (a lease class), not the raw `Connection` | Core's `Scope` has no close hooks — close drops instances ("eligible for cleanup", Core). Return-to-pool therefore rides ARC: the lease's `deinit` releases the connection the moment the scope's storage drops it. A raw connection value (possibly a struct — Core has no opinion about the type) has nowhere to hang that behavior. |
+| D3 | Flight Core delta 11 (`Scope.active` task-local, `resolveInActiveScope`) | The gap predicted the "second consumer" would find: factories receive only the `Container`, so a scoped repository had no path to the scope's connection. Fixed in Core, where it belongs — it is Scope semantics, not data semantics. Recorded as Core delta 11 with its own test suite. |
+| D4 | `register(dataSource:)` has instance *and* factory forms, plus `name:` | Modules cannot read `Configuration` during `configure` (resolution begins at `freeze()`, Core), so the "construct the DataSource from config" step happens inside a registered factory. The instance form remains for tests and hand-wiring. |
+| D5 | `DataSourceLiveness` component per datasource | The requirement was that stores "register a liveness check surfaced by Actuator", with no mechanism named. A qualified component wrapping `ping()`, discoverable via `DataSourceLiveness.all(in:)` through Core introspection, is that mechanism — Actuator needs zero store knowledge. |
 | D6 | `TestContainer` duplicated from `FlightWebTesting` | A data test must not need the web package. Identical API; qualify by module if a target imports both. Follow-up: hoist into a shared flight-testing package. |
-| D7 | `InMemoryDataModule` requires no `url` key | The in-memory store is "backed by nothing" (§7); requiring a URL it would ignore fails the doc's own `TestContainer.build { InMemoryDataModule() }` one-liner. `pool_size` is honored when present (default 4). Real store modules load `DataSourceSettings`, whose `url` is required. |
+| D7 | `InMemoryDataModule` requires no `url` key | The in-memory store is "backed by nothing"; requiring a URL it would ignore breaks the `TestContainer.build { InMemoryDataModule() }` one-liner. `pool_size` is honored when present (default 4). Real store modules load `DataSourceSettings`, whose `url` is required. |
 
-Changeset deltas (vs. [`../flight-changeset-design.md`](../flight-changeset-design.md)):
+Changeset decisions:
 
 | # | Delta | Why |
 |---|-------|-----|
-| C1 | The model seam is `TableModel`, not `Table` | The Postgres design (its §3.2) commits to StructuredQueries, whose central protocol is already named `Table`; driver code juggling two `Table`s would need module qualification everywhere. Same seam, collision-free name. |
+| C1 | The model seam is `TableModel`, not `Table` | The Postgres design (its) commits to StructuredQueries, whose central protocol is already named `Table`; driver code juggling two `Table`s would need module qualification everywhere. Same seam, collision-free name. |
 | C2 | `TableModel`/`TableColumn` are defined *here*, hand-conformable | The changeset doc consumes "`@Table` model types' column identifiers" as a given, but no model layer exists yet and this package must stay store-agnostic (no StructuredQueries dependency — that is the Postgres driver's choice). The Postgres package bridges its `@Table` metadata onto this protocol mechanically; a `@TableModel` conformance-generating macro is deliberate future sugar. |
-| C3 | `change` requires `V: Equatable` (an always-dirty overload covers the rest) | §6's "only if actually changed" is uncomputable without comparison. Equal-to-original changes are discarded, and a change back to the original *removes* the recorded change — `changes` always means exactly "differs from the original" (Ecto's `put_change` semantics). |
-| C4 | Validation semantics spelled out: field rules check *recorded changes* only; `validateRequired` checks the *effective* value; cross-field rules always run | The doc doesn't pin when rules fire. Ecto's answers are adopted: unchanged data was validated when written; requiredness must hold whether or not the field moved; consistency properties span the whole row. Nil changes skip format rules — nil-ness is `validateRequired`'s job. |
+| C3 | `change` requires `V: Equatable` (an always-dirty overload covers the rest) | "only if actually changed" is uncomputable without comparison. Equal-to-original changes are discarded, and a change back to the original *removes* the recorded change — `changes` always means exactly "differs from the original" (Ecto's `put_change` semantics). |
+| C4 | Validation semantics spelled out: field rules check *recorded changes* only; `validateRequired` checks the *effective* value; cross-field rules always run | When rules fire needs pinning down, and Ecto's answers are adopted: unchanged data was validated when written; requiredness must hold whether or not the field moved; consistency properties span the whole row. Nil changes skip format rules — nil-ness is `validateRequired`'s job. |
 | C5 | `CrossFieldRule` reads the changeset (`changeset.value(\.field)`), not a materialized model | Insert changesets have no original to overlay changes onto, so no full `Model` value exists to hand a rule. Effective-value reads work identically for inserts and updates; `.ordered` ships as the canned canonical case. |
 
 ## Dependency policy

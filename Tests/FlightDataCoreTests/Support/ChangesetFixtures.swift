@@ -6,7 +6,7 @@ import FlightDataCore
 // DriverBoundaryTests here still exercises the driver side against the
 // same models.
 
-// MARK: - TableModel fixtures (changeset design §3–§6)
+// MARK: - TableModel fixtures
 //
 // Hand conformances, exactly what the Postgres package's @Table bridge (or a
 // future @TableModel macro) would generate. Column names are snake_case

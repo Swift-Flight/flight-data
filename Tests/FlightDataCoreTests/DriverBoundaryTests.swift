@@ -3,15 +3,15 @@ import FlightCore
 import FlightDataCore
 import FlightDataTesting
 
-/// §5 — the changeset/driver boundary: one neutral `ValidatedChanges`, a
+/// — the changeset/driver boundary: one neutral `ValidatedChanges`, a
 /// per-driver `apply(_:)` translation, zero shared write logic. The InMemory
 /// "driver" journals its writes, which is exactly enough to prove the
 /// boundary carries everything a real driver needs.
-@Suite("Driver boundary (§5, §6)")
+@Suite("Driver boundary")
 struct DriverBoundaryTests {
 
     private func connection() -> InMemoryConnection {
-        // A standalone connection is fine here; the §6 test below goes
+        // A standalone connection is fine here; the test below goes
         // through the full scoped checkout.
         let source = InMemoryDataSource(poolSize: 1)
         return try! source.checkout()
@@ -74,10 +74,10 @@ struct DriverBoundaryTests {
         #expect(connection.journal.isEmpty)
     }
 
-    /// The design doc's §6 flow, end to end: scoped connection out of the
+    /// The whole flow, end to end: scoped connection out of the
     /// container, changeset validation, guard on isValid, apply — with the
     /// invalid path never reaching the store.
-    @Test("§6 end to end: validate, guard, apply through the scope's connection")
+    @Test("end to end: validate, guard, apply through the scope's connection")
     func endToEnd() throws {
         let container = try TestContainer.build {
             InMemoryDataModule<PrimaryDataSource>()

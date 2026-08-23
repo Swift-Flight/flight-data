@@ -3,9 +3,9 @@ import FlightCore
 import FlightDataCore
 import FlightDataTesting
 
-/// §2 — the cross-store contract, exercised through its default
+/// — the cross-store contract, exercised through its default
 /// `withConnection` implementation and the InMemory conformance.
-@Suite("DataSource contract (§2)")
+@Suite("DataSource contract")
 struct DataSourceContractTests {
 
     @Test("withConnection checks out for the body and returns the pool afterward")
@@ -77,9 +77,9 @@ struct DataSourceContractTests {
     }
 }
 
-/// §7 — the test double's own semantics, since every store-agnostic test in
+/// — the test double's own semantics, since every store-agnostic test in
 /// the Flight family will lean on them.
-@Suite("InMemoryDataSource (§7)")
+@Suite("InMemoryDataSource")
 struct InMemoryDataSourceTests {
 
     @Test("connections are created lazily, with stable sequential ids")

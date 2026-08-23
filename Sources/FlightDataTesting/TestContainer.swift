@@ -1,6 +1,6 @@
 import FlightCore
 
-/// §7: a thin wrapper producing a frozen `Container` from a set of modules
+///: a thin wrapper producing a frozen `Container` from a set of modules
 /// without going through full `ServiceGroup` bootstrap — scoping and
 /// lifecycle logic don't need real services running.
 ///
@@ -33,7 +33,7 @@ public enum TestContainer {
         let container = Container()
         container.register(Configuration.self, scope: .singleton) { _ in configuration }
 
-        // Same ordering rules as bootstrap (Flight Core §7 step 5), with the
+        // Same ordering rules as bootstrap (Flight Core step 5), with the
         // caller's ready-made instances substituted where types match.
         let byType = Dictionary(
             instances.map { (ObjectIdentifier(type(of: $0)), $0) },
