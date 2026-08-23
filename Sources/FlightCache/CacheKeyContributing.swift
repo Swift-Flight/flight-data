@@ -1,6 +1,6 @@
 import Foundation
 
-/// What identifies a value for caching purposes (design §4).
+/// What identifies a value for caching purposes.
 ///
 /// Every key-contributing parameter of a `@Cacheable`/`@CachePut`/
 /// `@CacheEvict` method must conform — checked at compile time by the
@@ -91,7 +91,7 @@ extension Array: CacheKeyContributing where Element: CacheKeyContributing {
 
 /// RawRepresentable types (string/int-backed enums, typed identifiers) get
 /// their raw value's representation — opt-in via explicit conformance
-/// declaration (`extension Region: CacheKeyContributing {}`), keeping §4's
+/// declaration (`extension Region: CacheKeyContributing {}`), keeping the
 /// "deliberate answer" posture while sparing the boilerplate.
 extension CacheKeyContributing where Self: RawRepresentable, RawValue: CacheKeyContributing {
     public var cacheKeyRepresentation: String { rawValue.cacheKeyRepresentation }

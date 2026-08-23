@@ -3,7 +3,7 @@ import Testing
 
 @testable import FlightCache
 
-@Suite("InMemoryCache — §10.1 bounded LRU with TTL")
+@Suite("InMemoryCache — bounded LRU with TTL")
 struct InMemoryCacheTests {
 
     private func data(_ string: String) -> Data { Data(string.utf8) }

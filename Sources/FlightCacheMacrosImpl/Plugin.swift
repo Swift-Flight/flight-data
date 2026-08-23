@@ -14,7 +14,7 @@ struct FlightCacheMacrosPlugin: CompilerPlugin {
 
 /// Shared diagnostic shape, mirroring FlightCoreMacros: every diagnostic
 /// names the fix, not just the problem — these fire at build time and are
-/// the §4 compile-time-first pitch in action.
+/// the compile-time-first pitch in action.
 struct FlightCacheMacroDiagnostic: DiagnosticMessage {
     let message: String
     let id: String

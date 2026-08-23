@@ -7,8 +7,8 @@ import FlightCacheTesting
 
 /// The real macro path: annotated methods on a real class, expanded by the
 /// real compiler plugin, running against a runtime bound through the
-/// task-local override — the §3.1 claims proven end to end, including the
-/// one Spring cannot make: self-invocation caches (§3.1).
+/// task-local override — the claims proven end to end, including the
+/// one Spring cannot make: self-invocation caches.
 @Suite("End-to-end — real @Cacheable/@CachePut/@CacheEvict expansion")
 struct EndToEndMacroTests {
 
@@ -21,7 +21,7 @@ struct EndToEndMacroTests {
             return productID * 100
         }
 
-        /// §3.1's self-invocation case: an internal call to a @Cacheable
+        /// self-invocation case: an internal call to a @Cacheable
         /// method on self. No proxy, so nothing to bypass.
         func priceViaInternalCall(productID: Int, region: String) async throws -> Int {
             try await price(for: productID, in: region)
@@ -70,7 +70,7 @@ struct EndToEndMacroTests {
         }
     }
 
-    @Test("self-invocation caches — the Spring footgun that cannot occur (§3.1)")
+    @Test("self-invocation caches — the Spring footgun that cannot occur")
     func selfInvocationCaches() async throws {
         try await withRuntime { service, _ in
             _ = try await service.priceViaInternalCall(productID: 7, region: "eu")
@@ -80,7 +80,7 @@ struct EndToEndMacroTests {
         }
     }
 
-    @Test("@CachePut overwrites the entry @Cacheable reads (§4 key contract)")
+    @Test("@CachePut overwrites the entry @Cacheable reads (same key contract)")
     func putTargetsCacheableEntry() async throws {
         try await withRuntime { service, _ in
             _ = try await service.price(for: 7, in: "eu")
@@ -119,7 +119,7 @@ struct EndToEndMacroTests {
         }
     }
 
-    @Test("without a bound runtime, annotated methods still work — uncached (§7)")
+    @Test("without a bound runtime, annotated methods still work — uncached")
     func unwiredAnnotationsFailOpen() async throws {
         let service = PricingService()
         FlightCaches.uninstall()

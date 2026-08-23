@@ -1,9 +1,9 @@
 import SwiftSyntax
 import SwiftSyntaxMacros
 
-/// `@Cacheable` (design §3): check cache; on hit return it; on miss call
+/// `@Cacheable`: check cache; on hit return it; on miss call
 /// the body, store the result, return it — expanded INTO the method body
-/// (§3.1), the same shape as Core's `@Transactional`: the original body
+///, the same shape as Core's `@Transactional`: the original body
 /// rides an immediately-invoked-style closure (here, the runtime's trailing
 /// closure) with an explicit signature, and the expansion reaches runtime
 /// state through the fully-qualified `FlightCache.FlightCaches` seam.

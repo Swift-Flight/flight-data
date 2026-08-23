@@ -7,11 +7,11 @@ import FlightCacheTesting
 @testable import FlightCache
 
 /// Serialized: these tests exercise the process-global `FlightCaches`
-/// install seam (§11), so they must not interleave.
-@Suite("FlightCacheModule — §11 wiring", .serialized)
+/// install seam, so they must not interleave.
+@Suite("FlightCacheModule — wiring", .serialized)
 struct ModuleTests {
 
-    /// The adapter-module contract from §11, in miniature: register the
+    /// The adapter-module contract from, in miniature: register the
     /// store under the well-known qualifier, depend on FlightCacheModule.
     final class RecordingAdapterModule: FlightModule {
         static var dependencies: [any FlightModule.Type] { [FlightCacheModule.self] }

@@ -11,7 +11,7 @@ import FlightCacheTesting
 /// to know waiters have actually parked. No test sleeps to "let" something
 /// happen: a sleep would be a guess about scheduling that races on a loaded
 /// machine and silently stops testing the intended ordering.
-@Suite("Single-flight — §8 stampede protection")
+@Suite("Single-flight — stampede protection")
 struct SingleFlightTests {
 
     private let key = CacheKey(namespace: "prices", parts: ["hot"])
@@ -88,7 +88,7 @@ struct SingleFlightTests {
         #expect(executions.value == 5)
     }
 
-    @Test("a leader error propagates to every waiter — no re-stampede (§8)")
+    @Test("a leader error propagates to every waiter — no re-stampede")
     func leaderErrorShared() async throws {
         struct Boom: Error {}
         let runtime = try runtime()
@@ -125,7 +125,7 @@ struct SingleFlightTests {
         #expect(await runtime.flights.inFlightCount == 0)
     }
 
-    @Test("a cancelled leader does not fail its waiters — one takes over (§8)")
+    @Test("a cancelled leader does not fail its waiters — one takes over")
     func leaderCancellationHandsOver() async throws {
         let runtime = try runtime()
         let executions = Counter()

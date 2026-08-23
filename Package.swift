@@ -2,7 +2,7 @@
 // Flight Cache — declarative caching: @Cacheable/@CacheEvict/@CachePut with
 // compile-time expansion, a store-agnostic `Cache` protocol, a bounded
 // in-memory adapter, and local single-flight stampede protection.
-// Implements ../flight-cache-design.md; see README.md for the design deltas
+// See README.md for the design decisions
 // discovered during implementation.
 import PackageDescription
 import CompilerPluginSupport
@@ -14,9 +14,9 @@ let package = Package(
         .macOS(.v15)
     ],
     products: [
-        // The package: the Cache protocol + CacheKey (§2), the macros (§3),
-        // key derivation (§4), codecs (§5), single-flight (§8), the
-        // in-memory adapter (§10.1), and FlightCacheModule (§11).
+        // The package: the Cache protocol + CacheKey, the macros,
+        // key derivation, codecs, single-flight, the
+        // in-memory adapter, and FlightCacheModule.
         .library(name: "FlightCache", targets: ["FlightCache"]),
         // Test support: RecordingCache for consumers (and this package's own
         // suites) to assert cache interactions without a real store.
@@ -24,20 +24,20 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../../Core/flight-core"),
-        // Dependency policy follows Flight Core §9: Apple-adjacent,
+        // Dependency policy follows Flight Core: Apple-adjacent,
         // SSWG-blessed only.
         .package(url: "https://github.com/apple/swift-log.git", from: "1.6.0"),
-        // Design §7 (R5): flight-core deliberately ships no metrics facade
+        // Design (R5): flight-core deliberately ships no metrics facade
         // yet, so this is the first Flight runtime package to take
         // swift-metrics directly. Counters only; backend is the app's.
         .package(url: "https://github.com/apple/swift-metrics.git", from: "2.5.0"),
-        // §10.1: OrderedDictionary is the LRU order for the in-memory
+        //: OrderedDictionary is the LRU order for the in-memory
         // adapter.
         .package(url: "https://github.com/apple/swift-collections.git", from: "1.1.0"),
         // swift-syntax bumps its major with each Swift release; the open
         // range is the community convention for macro packages.
         .package(url: "https://github.com/swiftlang/swift-syntax.git", "601.0.0"..<"999.0.0"),
-        // NOTE (design §2.1): deliberately NOT flight-data-valkey and not
+        // NOTE: deliberately NOT flight-data-valkey and not
         // any data package — the Valkey-backed adapter is a separate
         // package (flight-cache-valkey) built on the client library alone.
     ],

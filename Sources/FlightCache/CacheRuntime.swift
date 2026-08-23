@@ -4,13 +4,13 @@ import Logging
 import Metrics
 import Synchronization
 
-/// The runtime entry points the §3.1 expansions call — key assembly, `get`,
-/// decode, single-flight (§8), the body call, encode, `set`, and metrics
+/// The runtime entry points the expansions call — key assembly, `get`,
+/// decode, single-flight, the body call, encode, `set`, and metrics
 /// all live here, so the macro expansions stay small and the behavior is
 /// testable without macros.
 ///
-/// Every operation upholds §7's invariant through the `Cache` protocol's
-/// own shape: no store method throws, a decode failure is a miss (§5), an
+/// Every operation upholds invariant through the `Cache` protocol's
+/// own shape: no store method throws, a decode failure is a miss, an
 /// encode failure skips the `set` and still returns the computed value.
 public final class CacheRuntime: Sendable {
     public let store: any Cache
@@ -22,7 +22,7 @@ public final class CacheRuntime: Sendable {
     private let namespaceMetrics = Mutex<[String: NamespaceMetrics]>([:])
 
     /// How many times a waiter whose leader was cancelled re-enters the
-    /// flow before computing directly (§8).
+    /// flow before computing directly.
     private static let leaderCancelledRetries = 3
 
     public init(
@@ -41,7 +41,7 @@ public final class CacheRuntime: Sendable {
     // MARK: - @Cacheable (throwing)
 
     /// Check cache; on hit return it; on miss coalesce concurrent callers
-    /// (§8) and compute once. The `as:` parameter pins `Value` for
+    /// and compute once. The `as:` parameter pins `Value` for
     /// expansion-site clarity.
     public func cacheable<Value: Codable & Sendable>(
         namespace: String,
@@ -61,7 +61,7 @@ public final class CacheRuntime: Sendable {
             switch await flights.join(key) {
             case .lead:
                 do {
-                    // Double-check after winning leadership (§8): between
+                    // Double-check after winning leadership: between
                     // this caller's miss and its flight entry, a previous
                     // flight may have completed and populated the entry.
                     if let data = await store.get(key), let value: Value = decodeOrNil(data, for: key) {
@@ -166,7 +166,7 @@ public final class CacheRuntime: Sendable {
 
     // MARK: - @CachePut
 
-    /// Always overwrite (§3): the annotated body has already run; store its
+    /// Always overwrite: the annotated body has already run; store its
     /// result. Never short-circuits, never coalesces.
     public func cachePut<Value: Codable & Sendable>(
         namespace: String,
@@ -208,7 +208,7 @@ public final class CacheRuntime: Sendable {
         return value
     }
 
-    /// §5's fail-open decode: a decode failure is a miss, never an error —
+    /// fail-open decode: a decode failure is a miss, never an error —
     /// old entries that no longer decode are ignored and overwritten.
     private func decodeOrNil<Value: Decodable>(_ data: Data, for key: CacheKey) -> Value? {
         do {
@@ -221,8 +221,8 @@ public final class CacheRuntime: Sendable {
         }
     }
 
-    /// Encodes and stores `value` unless it is a `nil` result (§5: absence
-    /// is not cached) or encoding fails (§5: logged, skipped). Returns the
+    /// Encodes and stores `value` unless it is a `nil` result (absence
+    /// is not cached) or encoding fails (logged, skipped). Returns the
     /// encoded bytes when stored — what the leader publishes to waiters.
     private func storeIfCacheable<Value: Codable & Sendable>(
         _ value: Value, key: CacheKey, namespace: String, annotationTTL: Duration?
@@ -265,7 +265,7 @@ public final class CacheRuntime: Sendable {
         (Optional<Any>.none as Any) as? Value
     }
 
-    // MARK: - Metrics (§7)
+    // MARK: - Metrics
 
     private struct NamespaceMetrics {
         let hits: Counter

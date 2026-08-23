@@ -3,7 +3,7 @@ import Testing
 
 @testable import FlightCache
 
-@Suite("CacheKey — §2/§4 injective, prefix-safe encoding")
+@Suite("CacheKey — injective, prefix-safe encoding")
 struct CacheKeyTests {
 
     @Test("adjacent parts cannot collide")
@@ -48,7 +48,7 @@ struct CacheKeyTests {
     }
 }
 
-@Suite("CacheKeyContributing — §4 stable representations")
+@Suite("CacheKeyContributing — stable representations")
 struct CacheKeyContributingTests {
 
     enum Region: String, CacheKeyContributing { case eu, us }

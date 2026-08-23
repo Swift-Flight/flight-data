@@ -4,24 +4,24 @@ Declarative caching for Flight: annotate a method and its results are cached
 and served from cache on subsequent calls with the same inputs — Spring's
 `@Cacheable`/`@CacheEvict`/`@CachePut` analogue with **compile-time
 expansion in place of runtime proxies**. Implements
-[`../flight-cache-design.md`](../flight-cache-design.md) (as revised
-2026-08-22, §13) on top of Flight Core.
+Flight Core (as revised
+2026-08-22) on top of Flight Core.
 
 | Piece | Contents |
 |---|---|
-| `Cache` + `CacheKey` | §2: the entire cross-store seam — four async, non-throwing, `Data`-valued methods; injective, prefix-safe key encoding |
-| `@Cacheable` / `@CacheEvict` / `@CachePut` | §3: body macros expanding INTO the method body — no proxy, so self-invocation caches (the Spring footgun that cannot occur here) |
-| `CacheKeyContributing` | §4: explicit, compiler-checked key derivation; primitives ship, custom types conform deliberately |
-| `CacheCodec` / `JSONCacheCodec` | §5: Codable values, JSON by default, decode failure = miss |
-| `CacheRuntime` + `FlightCaches` | §3.1/§11: the runtime the expansions call, reached through a `FlightTransactions`-style seam (task-local override → installed runtime → warn-once no-op) |
-| `SingleFlight` | §8: local stampede protection — leader computes inline, waiters receive the encoded bytes, errors propagate, cancellation hands leadership over |
-| `InMemoryCache` | §10.1: actor-guarded `OrderedDictionary` LRU with TTL, bounded by default |
-| `FlightCacheModule` | §11: compose-by-presence — an adapter registered under `FlightCacheModule.storeQualifier` wins, else in-memory |
+| `Cache` + `CacheKey` |: the entire cross-store seam — four async, non-throwing, `Data`-valued methods; injective, prefix-safe key encoding |
+| `@Cacheable` / `@CacheEvict` / `@CachePut` |: body macros expanding INTO the method body — no proxy, so self-invocation caches (the Spring footgun that cannot occur here) |
+| `CacheKeyContributing` |: explicit, compiler-checked key derivation; primitives ship, custom types conform deliberately |
+| `CacheCodec` / `JSONCacheCodec` |: Codable values, JSON by default, decode failure = miss |
+| `CacheRuntime` + `FlightCaches` | The runtime the expansions call, reached through a `FlightTransactions`-style seam (task-local override → installed runtime → warn-once no-op) |
+| `SingleFlight` |: local stampede protection — leader computes inline, waiters receive the encoded bytes, errors propagate, cancellation hands leadership over |
+| `InMemoryCache` |: actor-guarded `OrderedDictionary` LRU with TTL, bounded by default |
+| `FlightCacheModule` |: compose-by-presence — an adapter registered under `FlightCacheModule.storeQualifier` wins, else in-memory |
 | `FlightCacheTesting` | `RecordingCache` — recording, seedable, `misbehave()`-able store for consumer tests |
 
 The Valkey/Redis adapter is
 [`../flight-cache-valkey`](../flight-cache-valkey) — a **separate package**
-that this one knows nothing about (design §2.1).
+that this one knows nothing about.
 
 ## Build status
 
@@ -29,7 +29,7 @@ that this one knows nothing about (design §2.1).
 Linux (x86_64): 51 tests green (11 macro-expansion fixtures, 40 runtime
 tests), including the real-macro end-to-end suite (self-invocation caching,
 `@CachePut`/`@CacheEvict` targeting `@Cacheable` entries across methods,
-fail-open with no runtime installed) and the §8 single-flight suite
+fail-open with no runtime installed) and the single-flight suite
 (coalescing, shared errors, leader-cancellation handover).
 
 ## Using it
@@ -65,7 +65,7 @@ final class PricingService {
 cache:
   default_ttl: 300          # integer seconds; 0 = no default
   namespaces:
-    prices: 900             # lowercase/digits/underscores — see design §6 R4
+    prices: 900             # lowercase/digits/underscores only
   memory:
     max_entries: 10000      # the in-memory adapter's LRU bound
 ```
@@ -81,7 +81,7 @@ extension ProductID: CacheKeyContributing {
 ## Design deltas
 
 Discovered while implementing; each is a deliberate refinement of the
-(already-revised) design doc, in its spirit.
+package's intent, in its spirit.
 
 - **C1 — two runtime entry points per annotation shape, selected by the
   macro.** A non-throwing async method body cannot ride a `throws` closure
@@ -90,7 +90,7 @@ Discovered while implementing; each is a deliberate refinement of the
   expansion emits `try await`/`await` to match. The non-throwing waiter
   cannot rethrow a throwing leader's error (possible only via a
   cross-method shared key), so it computes directly instead.
-- **C2 — typed throws is rejected at the annotation site.** §8's shared
+- **C2 — typed throws is rejected at the annotation site.** shared
   failure semantics propagate waiter errors as `any Error`; a
   `throws(SpecificError)` method could not re-throw them. Diagnosed, not
   silently mis-expanded.
@@ -99,7 +99,7 @@ Discovered while implementing; each is a deliberate refinement of the
   (`FlightCaches.$override.withValue`), and a process-global alone would
   make parallel test isolation impossible. Order: override → installed →
   warn-once no-op.
-- **C4 — the empty key segment escapes to `\e`.** §2's encoding spec left
+- **C4 — the empty key segment escapes to `\e`.** encoding spec left
   one collision open (`parts: []` vs `parts: [""]` both rendering a bare
   prefix); a reserved marker for the empty segment closes it while keeping
   the common case (`prices:123:eu`) readable in the store.

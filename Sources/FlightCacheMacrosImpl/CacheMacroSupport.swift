@@ -3,7 +3,7 @@ import SwiftSyntaxMacros
 
 /// The analysis shared by all three cache body macros: attribute-argument
 /// parsing and the function-shape checks the design diagnoses at the
-/// annotation site (§3.1).
+/// annotation site.
 enum CacheMacroSupport {
 
     /// Parsed attribute arguments, expressions kept as source text for
@@ -45,7 +45,7 @@ enum CacheMacroSupport {
                 else {
                     context.diagnoseError(
                         "cache.namespaceliteral",
-                        "namespace: must be a plain string literal — the namespace is compile-time cache identity (§4), not a runtime value.",
+                        "namespace: must be a plain string literal — the namespace is compile-time cache identity, not a runtime value.",
                         at: argument.expression)
                     return nil
                 }
@@ -56,7 +56,7 @@ enum CacheMacroSupport {
                 guard let literal = argument.expression.as(BooleanLiteralExprSyntax.self) else {
                     context.diagnoseError(
                         "cache.allentriesliteral",
-                        "allEntries: must be the literal true or false — eviction blast radius is a compile-time decision (§3).",
+                        "allEntries: must be the literal true or false — eviction blast radius is a compile-time decision.",
                         at: argument.expression)
                     return nil
                 }
@@ -118,7 +118,7 @@ enum CacheMacroSupport {
         guard effects?.asyncSpecifier != nil else {
             context.diagnoseError(
                 "cache.notasync",
-                "@\(macroName) requires an async method — the Cache protocol is async (§2), and a synchronous caching path would need a blocking store API this package deliberately doesn't have.",
+                "@\(macroName) requires an async method — the Cache protocol is async, and a synchronous caching path would need a blocking store API this package deliberately doesn't have.",
                 at: function.name)
             return nil
         }
@@ -126,7 +126,7 @@ enum CacheMacroSupport {
         if let throwsClause, throwsClause.leftParen != nil {
             context.diagnoseError(
                 "cache.typedthrows",
-                "@\(macroName) does not support typed throws — the cache runtime propagates coalesced errors as any Error (§8). Use an untyped throws.",
+                "@\(macroName) does not support typed throws — the cache runtime propagates coalesced errors as any Error. Use an untyped throws.",
                 at: throwsClause)
             return nil
         }
@@ -157,7 +157,7 @@ enum CacheMacroSupport {
             }
         }
         // Every excluding: name must exist — a typo here would silently
-        // change the key (§4's anti-SpEL rule).
+        // change the key (anti-SpEL rule).
         let allNames = function.signature.parameterClause.parameters.map {
             ($0.secondName ?? $0.firstName).text
         }
@@ -178,7 +178,7 @@ enum CacheMacroSupport {
     }
 
     /// `[FlightCache.CacheKey.part(a), FlightCache.CacheKey.part(b)]` — the
-    /// generic constraint on `part(_:)` is the §4 conformance check.
+    /// generic constraint on `part(_:)` is the conformance check.
     static func partsLiteral(for target: Target) -> String {
         "[" + target.keyParameterNames.map { "FlightCache.CacheKey.part(\($0))" }.joined(separator: ", ") + "]"
     }

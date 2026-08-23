@@ -7,7 +7,7 @@ import FlightCacheTesting
 
 @testable import FlightCache
 
-@Suite("CacheRuntime — the §3.1 entry points")
+@Suite("CacheRuntime — the entry points")
 struct CacheRuntimeTests {
 
     private func runtime(
@@ -35,7 +35,7 @@ struct CacheRuntimeTests {
         #expect(store.data(for: CacheKey(namespace: "prices", parts: ["1"])) != nil)
     }
 
-    @Test("a decode failure is a miss: recomputed and overwritten (§5)")
+    @Test("a decode failure is a miss: recomputed and overwritten")
     func decodeFailureIsMiss() async throws {
         let store = RecordingCache()
         let key = CacheKey(namespace: "prices", parts: ["1"])
@@ -49,7 +49,7 @@ struct CacheRuntimeTests {
         #expect(store.data(for: key) == Data("42".utf8))
     }
 
-    @Test("a nil result is returned but never stored (§5)")
+    @Test("a nil result is returned but never stored")
     func nilNotCached() async throws {
         let store = RecordingCache()
         let runtime = try runtime(store: store)
@@ -68,7 +68,7 @@ struct CacheRuntimeTests {
         #expect(store.data(for: CacheKey(namespace: "prices", parts: ["1"])) == nil)
     }
 
-    @Test("TTL precedence: annotation > namespace > default > none (§6)")
+    @Test("TTL precedence: annotation > namespace > default > none")
     func ttlPrecedence() async throws {
         let store = RecordingCache()
         let runtime = try runtime(
@@ -108,7 +108,7 @@ struct CacheRuntimeTests {
         }
     }
 
-    @Test("a malformed per-namespace TTL falls back to the default (§6)")
+    @Test("a malformed per-namespace TTL falls back to the default")
     func malformedNamespaceTTLIgnored() async throws {
         let store = RecordingCache()
         let runtime = try runtime(
@@ -120,7 +120,7 @@ struct CacheRuntimeTests {
         #expect(store.ttl(for: CacheKey(namespace: "prices", parts: ["1"])) == .seconds(300))
     }
 
-    @Test("cachePut always overwrites (§3)")
+    @Test("cachePut always overwrites")
     func putOverwrites() async throws {
         let store = RecordingCache()
         let runtime = try runtime(store: store)
@@ -158,7 +158,7 @@ struct CacheRuntimeTests {
         #expect(store.entryCount == 0)
     }
 
-    @Test("a downed store degrades to uncached, never to broken (§7)")
+    @Test("a downed store degrades to uncached, never to broken")
     func failOpen() async throws {
         let store = RecordingCache()
         store.misbehave()

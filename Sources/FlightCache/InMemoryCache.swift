@@ -1,7 +1,7 @@
 import Foundation
 import OrderedCollections
 
-/// The default adapter (design §10.1): an actor-guarded ordered dictionary
+/// The default adapter: an actor-guarded ordered dictionary
 /// with TTL expiry and a bounded size using LRU eviction. Bounded by
 /// default — an unbounded in-memory cache is a memory leak wearing a hat.
 ///
@@ -26,7 +26,7 @@ public actor InMemoryCache: Cache {
     public nonisolated let maxEntries: Int
 
     public init(maxEntries: Int = InMemoryCache.defaultMaxEntries) {
-        precondition(maxEntries > 0, "InMemoryCache is bounded by design (§10.1) — maxEntries must be positive.")
+        precondition(maxEntries > 0, "InMemoryCache is bounded by design — maxEntries must be positive.")
         self.maxEntries = maxEntries
     }
 

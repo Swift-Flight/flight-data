@@ -1,8 +1,8 @@
 import SwiftSyntax
 import SwiftSyntaxMacros
 
-/// `@CachePut` (design §3): always call the body, then overwrite the cached
-/// value — never short-circuits. The §4 cross-method key contract is what
+/// `@CachePut`: always call the body, then overwrite the cached
+/// value — never short-circuits. The cross-method key contract is what
 /// makes the put land on the entry a `@Cacheable` method reads; remember
 /// `excluding:` for the new-value parameter.
 public struct CachePutMacro: BodyMacro {
@@ -24,7 +24,7 @@ public struct CachePutMacro: BodyMacro {
 
         let effect = target.isThrowing ? "try await" : "await"
         let closureThrows = target.isThrowing ? " throws" : ""
-        // The body runs first — a throw means nothing is cached (§3). The
+        // The body runs first — a throw means nothing is cached. The
         // explicit closure signature keeps `return` and inference exactly as
         // @Transactional's expansion does.
         let run: DeclSyntax = """

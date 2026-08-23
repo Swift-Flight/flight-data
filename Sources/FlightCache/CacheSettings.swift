@@ -2,11 +2,11 @@ import FlightCore
 import Logging
 import Synchronization
 
-/// The `cache.*` config vocabulary (design §6), following Flight Data
+/// The `cache.*` config vocabulary, following Flight Data
 /// Core's `DataSourceConfigKey` shape. TTL values are integer seconds —
 /// flight-config numbers are plain `Int`s; no duration syntax is invented
 /// here. Namespace names should stick to lowercase letters, digits,
-/// underscores, and dots (§6 R4): the env-var override layer maps keys
+/// underscores, and dots: the env-var override layer maps keys
 /// through `FLIGHT_` + uppercase + `.`→`_`, and a hyphenated name produces
 /// a variable shells cannot set.
 public enum CacheConfigKey {
@@ -18,7 +18,7 @@ public enum CacheConfigKey {
     public static func namespaceTTL(_ namespace: String) -> String {
         "cache.namespaces.\(namespace)"
     }
-    /// `cache.memory.max_entries` — the in-memory adapter's LRU bound (§10.1).
+    /// `cache.memory.max_entries` — the in-memory adapter's LRU bound.
     public static let memoryMaxEntries = "cache.memory.max_entries"
 }
 
@@ -34,12 +34,12 @@ public enum CacheConfigurationError: Error, Sendable, Equatable, CustomStringCon
         case .negativeDefaultTTL(let seconds):
             return "\(CacheConfigKey.defaultTTL) is \(seconds) — a TTL cannot be negative. Use 0 for \"no default TTL\"."
         case .invalidMaxEntries(let count):
-            return "\(CacheConfigKey.memoryMaxEntries) is \(count) — the in-memory cache is bounded by design (§10.1); use a positive entry count."
+            return "\(CacheConfigKey.memoryMaxEntries) is \(count) — the in-memory cache is bounded by design; use a positive entry count."
         }
     }
 }
 
-/// The §6 TTL policy: annotation `ttl:` > `cache.namespaces.<name>` >
+/// The TTL policy: annotation `ttl:` > `cache.namespaces.<name>` >
 /// `cache.default_ttl` > no expiry.
 ///
 /// The default is read (and validated) eagerly — at `CacheRuntime`
@@ -49,7 +49,7 @@ public enum CacheConfigurationError: Error, Sendable, Equatable, CustomStringCon
 /// `cache.namespaces.*`), and the namespace set is known at the annotation
 /// sites, not in config. A malformed per-namespace value is logged and
 /// ignored (the default applies) — a config typo must not become a runtime
-/// error on a hot path (§7).
+/// error on a hot path.
 public final class CacheTTLPolicy: Sendable {
     private let configuration: Configuration?
     private let defaultTTL: Duration?

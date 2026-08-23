@@ -1,7 +1,7 @@
 import Logging
 import Synchronization
 
-/// The seam the §3.1 expansions target — Flight Cache's analogue of Core's
+/// The seam the expansions target — Flight Cache's analogue of Core's
 /// `FlightTransactions`: Flight Core has no ambient container and a body
 /// macro cannot add members, so generated code reaches runtime state
 /// through this process-level access point, named fully qualified
@@ -12,11 +12,11 @@ import Synchronization
 /// 1. `override` — a task-local, for tests and for pipelines that need a
 ///    different runtime scoped to a task tree.
 /// 2. The installed runtime — set once by `FlightCacheModule`'s
-///    `CacheRuntime` factory at `freeze()` (§11).
+///    `CacheRuntime` factory at `freeze()`.
 /// 3. A no-op fallback over `NoopCache` — a `@Cacheable` method in an app
 ///    that never installed `FlightCacheModule` computes every call: a
 ///    warn-once log, not an error. The unwired cache fails open like every
-///    other cache failure (§7).
+///    other cache failure.
 public enum FlightCaches {
     /// Task-local override — tests bind it with
     /// `FlightCaches.$override.withValue(runtime) { ... }`.

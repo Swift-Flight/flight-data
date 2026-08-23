@@ -1,6 +1,6 @@
 // Cache macro expansion fixtures — the same posture as flight-core's
 // MacroFixtureTests: these expected strings ARE the specification of the
-// §3.1 expansions; the design doc's prose example is illustrative, these
+// expansions; a prose example is illustrative, these
 // are normative.
 
 import SwiftSyntax
@@ -20,7 +20,7 @@ private let testMacros: [String: MacroSpec] = [
 final class CacheMacroFixtureTests: XCTestCase {
 
     // MARK: Fixture 1 — @Cacheable on an async throws method (the design's
-    // §3 example, corrected spellings)
+    // example, corrected spellings)
 
     func testCacheableAsyncThrows() {
         assertMacroExpansion(
@@ -133,7 +133,7 @@ final class CacheMacroFixtureTests: XCTestCase {
         )
     }
 
-    // MARK: Fixture 5 — @CachePut with the new value excluded (§3's
+    // MARK: Fixture 5 — @CachePut with the new value excluded (the
     // corrected overridePrice example)
 
     func testCachePutExcludingNewValue() {
@@ -188,7 +188,7 @@ final class CacheMacroFixtureTests: XCTestCase {
             diagnostics: [
                 DiagnosticSpec(
                     message:
-                        "@Cacheable requires an async method — the Cache protocol is async (§2), and a synchronous caching path would need a blocking store API this package deliberately doesn't have.",
+                        "@Cacheable requires an async method — the Cache protocol is async, and a synchronous caching path would need a blocking store API this package deliberately doesn't have.",
                     line: 3, column: 10)
             ],
             macroSpecs: testMacros
@@ -292,7 +292,7 @@ final class CacheMacroFixtureTests: XCTestCase {
             diagnostics: [
                 DiagnosticSpec(
                     message:
-                        "namespace: must be a plain string literal — the namespace is compile-time cache identity (§4), not a runtime value.",
+                        "namespace: must be a plain string literal — the namespace is compile-time cache identity, not a runtime value.",
                     line: 2, column: 27)
             ],
             macroSpecs: testMacros
@@ -319,7 +319,7 @@ final class CacheMacroFixtureTests: XCTestCase {
             diagnostics: [
                 DiagnosticSpec(
                     message:
-                        "@Cacheable does not support typed throws — the cache runtime propagates coalesced errors as any Error (§8). Use an untyped throws.",
+                        "@Cacheable does not support typed throws — the cache runtime propagates coalesced errors as any Error. Use an untyped throws.",
                     line: 3, column: 31)
             ],
             macroSpecs: testMacros

@@ -1,7 +1,7 @@
 import SwiftSyntax
 import SwiftSyntaxMacros
 
-/// `@CacheEvict` (design §3): call the body, then — on normal return, not
+/// `@CacheEvict`: call the body, then — on normal return, not
 /// on a throw — remove the entry derived from the arguments, or the whole
 /// namespace with `allEntries: true`. The flag is explicit: `allEntries:
 /// false` with zero key-contributing parameters is a compile error, never

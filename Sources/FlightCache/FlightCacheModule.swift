@@ -1,6 +1,6 @@
 import FlightCore
 
-/// Module wiring (design §11), following PubSub's compose-by-presence
+/// Module wiring, following PubSub's compose-by-presence
 /// pattern:
 ///
 /// ```swift
@@ -12,7 +12,7 @@ import FlightCore
 ///
 /// `configure(_:)` registers:
 ///
-/// 1. `InMemoryCache` — the §10.1 default store, `.singleton`, its LRU
+/// 1. `InMemoryCache` — the default store, `.singleton`, its LRU
 ///    bound read from `cache.memory.max_entries` at `freeze()` so a bad
 ///    value fails bootstrap;
 /// 2. the unqualified `(any Cache)` — resolves an adapter registered under
@@ -21,7 +21,7 @@ import FlightCore
 ///    adapter module = single-instance deployment, the common case;
 /// 3. `CacheRuntime` — store + TTL policy + codec + single-flight +
 ///    metrics. Its factory **installs the runtime into the `FlightCaches`
-///    seam** (§3.1) — the factory runs at `freeze()`, so annotated methods
+///    seam** — the factory runs at `freeze()`, so annotated methods
 ///    are served from the first request.
 ///
 /// No `service`: the in-memory store has no long-running work. Adapter

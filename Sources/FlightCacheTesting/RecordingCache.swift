@@ -4,7 +4,7 @@ import Synchronization
 
 /// A `Cache` that records every operation and serves from a plain
 /// dictionary — for consumers (and this package's own suites) to assert
-/// cache interactions without a real store. The §7 analogue of PubSub's
+/// cache interactions without a real store. The analogue of PubSub's
 /// `RecordingAdapter`.
 ///
 /// `misbehave()` turns every subsequent `get` into a miss and drops every

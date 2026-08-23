@@ -1,17 +1,17 @@
 import Foundation
 
-/// Local single-flight (design §8): concurrent calls on this instance for
+/// Local single-flight: concurrent calls on this instance for
 /// the same key coalesce into one execution of the underlying method. An
 /// actor-guarded in-flight map — genuinely stateful, serialized-mutation
-/// state, exactly the case Core §8 reserves actors for.
+/// state, exactly the case Core reserves actors for.
 ///
 /// The leader runs the body inline in its own task (structured concurrency —
 /// no unstructured `Task` holding a caller's non-`Sendable` self); waiters
-/// receive the leader's *encoded bytes* and decode for themselves. §8 pins
+/// receive the leader's *encoded bytes* and decode for themselves. pins
 /// the failure semantics: a leader error propagates to every waiter, except
 /// cancellation, which sends waiters back around to elect a new leader.
 ///
-/// Explicitly NOT distributed (§8): with N instances you get at most N
+/// Explicitly NOT distributed: with N instances you get at most N
 /// concurrent recomputations rather than one — an honest stopping point.
 public actor SingleFlight {
     /// What the leader hands its waiters.
@@ -56,7 +56,7 @@ public actor SingleFlight {
     /// MUST eventually call `complete(_:with:)` — on every path, including
     /// throws and cancellation — or waiters park forever. Later callers
     /// suspend until the leader completes; a parked waiter is deliberately
-    /// not cancellable mid-wait (§8): it waits out the leader's execution,
+    /// not cancellable mid-wait: it waits out the leader's execution,
     /// which is bounded by the computation it was about to run anyway.
     public func join(_ key: CacheKey) async -> Join {
         guard waiters[key] != nil else {
