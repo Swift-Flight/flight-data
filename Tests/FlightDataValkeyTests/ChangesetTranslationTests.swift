@@ -3,10 +3,10 @@ import FlightDataCore
 import FlightDataValkey
 import Testing
 
-/// The §5.3 translation, no server required: `ValidatedChanges` → hash-write
+/// The translation, no server required: `ValidatedChanges` → hash-write
 /// plan. Validation and dirty-tracking live in Flight Data Core and are
 /// tested there; these tests cover only this driver's obligation.
-@Suite("Changeset translation (§5.3)")
+@Suite("Changeset translation")
 struct ChangesetTranslationTests {
     @Test func updateChangesetPlansHSETOfChangedFieldsOnly() throws {
         let original = Session(id: "abc", userID: 7, ipAddress: "10.0.0.1", loginCount: 3)

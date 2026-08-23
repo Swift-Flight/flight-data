@@ -4,10 +4,10 @@ import ServiceLifecycle
 import Synchronization
 import Valkey
 
-/// The Valkey/Redis pool behind the `DataSource` seam (design §4.1, Flight
-/// Data Core §2/§3): one per configured datasource, registered `.singleton`,
+/// The Valkey/Redis pool behind the `DataSource` seam (design, Flight
+/// Data Core /): one per configured datasource, registered `.singleton`,
 /// its long-running work handed to the `ServiceGroup` via
-/// `FlightModule.service` (§6).
+/// `FlightModule.service`.
 ///
 /// ## Why this pool exists (design delta V1 — see README.md)
 ///
@@ -26,7 +26,7 @@ import Valkey
 /// auth, database selection — stays valkey-swift's.
 ///
 /// `run()` is the module service's body: no request is served before the
-/// pool is live (Flight Core §7 bootstrap ordering), and graceful shutdown
+/// pool is live (Flight Core bootstrap ordering), and graceful shutdown
 /// drains it.
 public final class ValkeyDataSource: DataSource, Sendable {
     public typealias Connection = ValkeyConnection
@@ -34,7 +34,7 @@ public final class ValkeyDataSource: DataSource, Sendable {
     /// The datasource's name — config key segment and registration qualifier.
     public let name: String
     /// Fixed pool size: every connection is dialed at `start()`; checkout
-    /// never grows the pool (Flight Data Core §2: prompt or throw).
+    /// never grows the pool (Flight Data Core: prompt or throw).
     public let poolSize: Int
     /// The parsed `datasource.<name>.url`.
     public let url: ValkeyDataSourceURL
@@ -75,8 +75,8 @@ public final class ValkeyDataSource: DataSource, Sendable {
         self.name = settings.name
         self.poolSize = settings.poolSize
         // Parsed here — at freeze()'s eager singleton construction — so a
-        // malformed URL fails bootstrap, not the first command (§3.2, Flight
-        // Data Core §4 posture). TLS context construction likewise.
+        // malformed URL fails bootstrap, not the first command (Flight
+        // Data Core posture). TLS context construction likewise.
         self.url = try ValkeyDataSourceURL.parse(settings.url, datasource: settings.name)
         self.connectionConfiguration = try self.url.connectionConfiguration()
         self.logger = logger ?? Logger(label: "flight.data.valkey.\(settings.name)")
@@ -85,7 +85,7 @@ public final class ValkeyDataSource: DataSource, Sendable {
             of: Void.self, bufferingPolicy: .bufferingNewest(1))
     }
 
-    // MARK: - Service body (§6)
+    // MARK: - Service body
 
     /// Dials the pool, then maintains it (replacing broken connections) until
     /// task cancellation or graceful shutdown, then drains it. This is the
@@ -253,23 +253,59 @@ public final class ValkeyDataSource: DataSource, Sendable {
         }
     }
 
+    /// Backoff between failed replacement dials: doubles from 100ms, capped
+    /// at 5s, so an outage costs a handful of attempts a minute rather than a
+    /// spin.
+    private static let minimumReplacementBackoff = Duration.milliseconds(100)
+    private static let maximumReplacementBackoff = Duration.seconds(5)
+
     private func replaceBrokenConnections() async {
+        var backoff = Self.minimumReplacementBackoff
+        var consecutiveFailures = 0
+
         while true {
             let deficit = state.withLock { state -> Int in
                 state.phase == .running ? poolSize - state.established : 0
             }
             guard deficit > 0 else { return }
+
             do {
                 try await addConnection()
-                logger.info("replaced broken valkey connection", metadata: ["datasource": "\(name)"])
+                if consecutiveFailures > 0 {
+                    logger.info(
+                        "valkey reachable again; pool refilling",
+                        metadata: [
+                            "datasource": "\(name)",
+                            "failed-attempts": "\(consecutiveFailures)",
+                        ])
+                }
+                backoff = Self.minimumReplacementBackoff
+                consecutiveFailures = 0
             } catch {
-                // The server is unreachable; the next close/release that
-                // notices a broken connection re-triggers replacement, and
-                // pings keep Actuator honest in the meantime.
-                logger.warning("failed to replace broken valkey connection", metadata: [
-                    "datasource": "\(name)", "error": "\(error)",
-                ])
-                return
+                // Returning here is what wedged the pool. The reasoning was
+                // that "the next close/release re-triggers replacement" — but
+                // once every connection has been retired there are no more
+                // closes and no more releases, so nothing ever re-triggered
+                // it. The pool sat at zero established, answering
+                // `poolExhausted` and blaming the operator's `pool_size`,
+                // until the process was restarted. A transient outage became
+                // permanent.
+                consecutiveFailures += 1
+                logger.warning(
+                    "failed to replace broken valkey connection; retrying",
+                    metadata: [
+                        "datasource": "\(name)",
+                        "error": "\(error)",
+                        "attempt": "\(consecutiveFailures)",
+                        "retry-in": "\(backoff)",
+                    ])
+
+                do {
+                    try await Task.sleep(for: backoff)
+                } catch {
+                    return  // cancelled: the service is shutting down
+                }
+                backoff = min(backoff * 2, Self.maximumReplacementBackoff)
             }
         }
     }
@@ -321,7 +357,7 @@ public final class ValkeyDataSource: DataSource, Sendable {
 
     /// `PING`, surfaced by Actuator through the `DataSourceLiveness`
     /// component that `register(dataSource:)` registers alongside the pool
-    /// (design §4.1).
+    ///.
     public func ping() async throws {
         try await withConnection { connection in
             _ = try await connection.ping()
@@ -351,7 +387,7 @@ public final class ValkeyDataSource: DataSource, Sendable {
 /// vocabulary.
 public enum ValkeyDataSourceError: Error, Sendable, Equatable, CustomStringConvertible {
     /// Checkout before the pool's service started. Under real bootstrap this
-    /// is unreachable (Flight Core §7: services start before requests are
+    /// is unreachable (Flight Core: services start before requests are
     /// served); reaching it means a test harness resolved a connection
     /// without starting the module's service.
     case notStarted(datasource: String)
@@ -359,7 +395,7 @@ public enum ValkeyDataSourceError: Error, Sendable, Equatable, CustomStringConve
     public var description: String {
         switch self {
         case .notStarted(let datasource):
-            return "Datasource '\(datasource)' has not started — its pool dials connections when its service runs (Flight Core §7). In tests, start the service (or call start()) before resolving connections."
+            return "Datasource '\(datasource)' has not started — its pool dials connections when its service runs (Flight Core). In tests, start the service (or call start()) before resolving connections."
         }
     }
 }

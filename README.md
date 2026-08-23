@@ -7,18 +7,18 @@ integration. Implements
 of Flight Core and Flight Data Core.
 
 This package is *composition plus stereotypes*, not a from-scratch client
-(design §2): the driver and wire protocol are **valkey-swift** — concurrency-
+(design): the driver and wire protocol are **valkey-swift** — concurrency-
 native, Valkey/Redis compatible, its command coverage generated from Valkey's
 own command specifications. What Flight builds is the seam:
 
 | Piece | Contents |
 |---|---|
-| `ValkeyDataSource` | The pool, behind Flight Data Core's `DataSource` seam (§4.1): synchronous checkout/release, eager dial at service start, broken-connection replacement, `PING` liveness |
-| `ValkeyDataModule<Name>` | §6 module wiring: pool + scoped `ValkeyConnection` lease + `DataSourceLiveness`, one generic instantiation per named datasource |
-| `ValkeyDataSourceURL` | §3.2 URL parsing — `valkey://` and `redis://` are exact synonyms (`valkeys://`/`rediss://` for TLS), auth, database number |
-| `multi { … }` | §5.2: `MULTI`/`EXEC` under its own honest name — an atomic batch, deliberately **not** `@Transactional` |
-| `command("…", …)` | §4.3 escape hatch: raw commands, outside the §3.1 compatibility guarantee |
-| `apply(_:to:)` | §5.3: changeset `ValidatedChanges` → `HSET` of exactly the changed fields (`HDEL` for nil), same neutral seam the Postgres driver consumes |
+| `ValkeyDataSource` | The pool, behind Flight Data Core's `DataSource` seam: synchronous checkout/release, eager dial at service start, broken-connection replacement, `PING` liveness |
+| `ValkeyDataModule<Name>` | module wiring: pool + scoped `ValkeyConnection` lease + `DataSourceLiveness`, one generic instantiation per named datasource |
+| `ValkeyDataSourceURL` | URL parsing — `valkey://` and `redis://` are exact synonyms (`valkeys://`/`rediss://` for TLS), auth, database number |
+| `multi { … }` |: `MULTI`/`EXEC` under its own honest name — an atomic batch, deliberately **not** `@Transactional` |
+| `command("…", …)` | escape hatch: raw commands, outside the compatibility guarantee |
+| `apply(_:to:)` |: changeset `ValidatedChanges` → `HSET` of exactly the changed fields (`HDEL` for nil), same neutral seam the Postgres driver consumes |
 
 The typed command surface (`hset`, `expire`, `zadd`, …) is the **driver's
 own** generated `ValkeyClientProtocol` extension — this package adds only two
@@ -29,11 +29,41 @@ typed scores) and deliberately does not re-wrap hundreds of commands.
 
 **Builds and passes all tests** — verified 2026-07-19 against Swift 6.2.3 on
 Linux (x86_64): 59 tests green, the integration suites running against **both
-a real Valkey 8 and a real Redis 7** (§8's compatibility check): pool
+a real Valkey 8 and a real Redis 7** (compatibility check): pool
 lifecycle and broken-connection replacement, scope-bound checkout through the
 real `@Repository`/`@Autowired` macro path, the typed surface, `multi`
 semantics (including the no-rollback per-slot failure test), the raw-command
 hatch, and changeset apply.
+
+## What happens when the server goes away
+
+The pool retries replacement with backoff — 100ms doubling to a 5s cap —
+for as long as its service runs. It used to give up after a single failed
+dial, on the reasoning that the next connection close would re-trigger
+replacement. That holds while some connections survive; once an outage
+retires all of them there are no more closes, so nothing re-triggered
+anything. The pool sat at zero established, answered `poolExhausted`, and
+blamed the operator's `pool_size` until the process was restarted. A blip
+became permanent.
+
+`ping()` is the probe Actuator reads. Note that `shutdown()` is what
+returns connections: a `ValkeyDataSource` started by hand in a test and
+never shut down keeps its connections for the lifetime of the process.
+Under `Flight.bootstrap` the module's service handles that.
+
+## Writes that partly fail
+
+`transaction(_:)` reports per-command outcomes, and a MULTI the server
+accepts can still contain commands that fail. `apply(_:to:)` inspects every
+one and throws `ValkeyChangesetError.commandFailed` naming the index —
+previously the results were discarded, so the write reported success while
+landing nothing, but *only* on the path taken when a changeset nils a field.
+The same logical write threw or vanished depending on that.
+
+A non-positive `expire(_:after:)` is refused rather than sent: the server
+reads a negative timeout as "delete the key", which is not what a caller
+whose TTL arithmetic went negative meant. The batch builder cannot throw, so
+it clamps to one millisecond instead.
 
 ## Using it
 
@@ -66,7 +96,7 @@ struct SessionRepository {
 }
 ```
 
-Atomic batches (not transactions — §5.2):
+Atomic batches (not transactions —):
 
 ```swift
 try await valkey.multi { batch in
@@ -75,13 +105,13 @@ try await valkey.multi { batch in
 }   // atomic batch — NOT a rollback-capable transaction
 ```
 
-Escape hatch (§4.3 — informed choice, outside the compatibility guarantee):
+Escape hatch — an informed choice, outside the compatibility guarantee:
 
 ```swift
-try await valkey.command("JSON.SET", "doc:1", "$", jsonPayload)   // Redis-only; §3.1 applies
+try await valkey.command("JSON.SET", "doc:1", "$", jsonPayload)   // Redis-only; applies
 ```
 
-Changesets (§5.3):
+Changesets:
 
 ```swift
 let changeset = Changeset(original: session)
@@ -94,7 +124,7 @@ try await valkey.apply(changeset.validatedChanges(), to: Session.self)
 ## Running the tests
 
 Unit tests need nothing. Integration tests are gated per server and run the
-same code against every server you configure — that duality **is** the §3.1
+same code against every server you configure — that duality **is** the
 compatibility test:
 
 ```
@@ -114,7 +144,7 @@ Discovered while implementing; each is a deliberate deviation from (or
 refinement of) the design doc, in its spirit.
 
 - **V1 — the pool is lender tasks parked inside the driver's scoped lending.**
-  The doc's §4.1 assumes connections can be checked out of the client.
+  The doc's assumes connections can be checked out of the client.
   valkey-swift exposes *only* scoped lending (`withConnection`); its
   `connect()` is internal. The seam still needs synchronous `checkout()`
   (Flight Data Core delta D1), so — the same resolution as Data Postgres's
@@ -125,7 +155,7 @@ refinement of) the design doc, in its spirit.
   is the broken-connection signal; a replacement dial follows. Connections
   are dialed directly per-slot rather than through a `ValkeyClient`, because
   a scope-pinned connection cannot participate in cluster-mode per-command
-  routing anyway (§9: no cluster orchestration in v1 — apps wanting cluster
+  routing anyway (no cluster orchestration in v1 — apps wanting cluster
   routing should hold a `ValkeyClient` themselves).
 
 - **V2 — a checked-out connection can die unnoticed for one command.** The
@@ -146,7 +176,7 @@ refinement of) the design doc, in its spirit.
   server-side; the doc's spelling is kept as sugar over its replacement, with
   the `withScores: true` overload returning `[(String, Double)]` as written.
 
-- **V5 — changeset key derivation.** §5.3 says "an `HSET` of exactly the
+- **V5 — changeset key derivation.** says "an `HSET` of exactly the
   changed fields" but a hash needs a key. Convention:
   `<tableName>:<pk>[:<pk>…]` — identity values for updates, the changed
   fields' primary-key values for inserts (missing → a loud
@@ -160,7 +190,7 @@ refinement of) the design doc, in its spirit.
   the pool notices via `onClose` and redials. The default server timeout
   (0 = never) makes this moot.
 
-## Boundary notes (§1.1, §7, §9)
+## Boundary notes
 
 No caching abstraction, no PubSub, no migrations, no `@Transactional` (the
 module registers **no** transaction coordinator — asserted by test), no

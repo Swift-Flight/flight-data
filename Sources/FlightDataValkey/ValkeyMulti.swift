@@ -1,6 +1,6 @@
 import Valkey
 
-/// `MULTI`/`EXEC` under its own honest name (design §5.2).
+/// `MULTI`/`EXEC` under its own honest name.
 ///
 /// This is deliberately **not** `@Transactional`. Valkey's `MULTI`/`EXEC` is
 /// an atomic batch — other clients never observe a point between the queued
@@ -8,7 +8,7 @@ import Valkey
 /// logical failure, no isolation of the `BEGIN` kind, and a command that
 /// fails inside `EXEC` does not undo the ones before it. A shared
 /// transaction abstraction would have to lie about one of the two semantics
-/// (Flight Data Core §6), so the capability ships under a different name
+/// (Flight Data Core), so the capability ships under a different name
 /// with different semantics:
 ///
 /// ```swift
@@ -25,7 +25,7 @@ extension ValkeyClientProtocol {
     ///   that the server rejects at *execution* time (wrong type, bad
     ///   arguments against live data) is a `.failure` **in its slot** — the
     ///   commands around it still ran; nothing rolls back. That per-slot
-    ///   result is the §5.2 semantics made visible in the signature.
+    ///   result is the semantics made visible in the signature.
     /// - Throws: `ValkeyTransactionError` when `EXEC` itself aborts (a
     ///   command failed to *queue*, or a `WATCH` guard tripped), or a
     ///   connection-level error. An empty batch sends nothing.
@@ -44,7 +44,7 @@ extension ValkeyClientProtocol {
 ///
 /// Any `ValkeyCommand` can be queued via `add(_:)` — the typed command
 /// values (`INCR`, `HSET`, …) are the same ones the direct surface executes,
-/// and `ValkeyRawCommand` rides along for the §4.3 escape hatch. The named
+/// and `ValkeyRawCommand` rides along for the escape hatch. The named
 /// methods below are conveniences for the common-command-set operations
 /// batches most often queue; they add nothing `add` can't.
 public struct ValkeyMultiBatch: Sendable {
@@ -57,7 +57,7 @@ public struct ValkeyMultiBatch: Sendable {
         commands.append(command)
     }
 
-    /// Queues a §4.3 raw command.
+    /// Queues a raw command.
     public mutating func command(
         _ name: String,
         _ arguments: any RESPStringRenderable...,
@@ -92,8 +92,16 @@ public struct ValkeyMultiBatch: Sendable {
 
     /// Sub-second precision via `PEXPIRE`, matching the direct surface's
     /// `expire(_:after:)`.
+    ///
+    /// A non-positive duration is clamped to one millisecond rather than sent
+    /// as-is: the server reads a negative timeout as "delete the key", and a
+    /// batch builder cannot throw to say so. One millisecond expires the key
+    /// almost immediately, which is what the caller asked for, without
+    /// turning a TTL into a deletion. The direct `expire(_:after:)` refuses
+    /// outright, because it can.
     public mutating func expire(_ key: ValkeyKey, after duration: Duration) {
-        add(PEXPIRE(key, milliseconds: duration.wholeMilliseconds))
+        let milliseconds = max(1, duration.wholeMilliseconds)
+        add(PEXPIRE(key, milliseconds: milliseconds))
     }
 
     public mutating func persist(_ key: ValkeyKey) {
@@ -146,7 +154,7 @@ public struct ValkeyMultiBatch: Sendable {
 /// The per-command outcomes of one `multi` batch, in queue order.
 public struct ValkeyMultiResults: Sendable, RandomAccessCollection {
     /// One entry per queued command. `.failure` means the server rejected
-    /// that command at execution time; its neighbors still ran (§5.2).
+    /// that command at execution time; its neighbors still ran.
     public let results: [Result<RESPToken, ValkeyClientError>]
 
     public init(results: [Result<RESPToken, ValkeyClientError>]) {

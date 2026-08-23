@@ -5,9 +5,9 @@ import FlightDataValkey
 import Testing
 
 /// Registration and bootstrap behavior that needs no server: the module's
-/// components, the fail-at-freeze posture (Flight Data Core §4), and §5.2's
+/// components, the fail-at-freeze posture (Flight Data Core), and.2's
 /// deliberate absences.
-@Suite("ValkeyDataModule registration (§6)")
+@Suite("ValkeyDataModule registration")
 struct ModuleRegistrationTests {
     /// A syntactically valid URL for a server that is never dialed —
     /// construction parses eagerly but connects only when the service runs.
@@ -84,7 +84,7 @@ struct ModuleRegistrationTests {
     }
 
     @Test func malformedURLFailsAtFreeze() {
-        // Flight Data Core §4 posture: a bad URL is a bootstrap failure, not
+        // Flight Data Core posture: a bad URL is a bootstrap failure, not
         // a first-command one.
         let configuration = Configuration(values: [
             DataSourceConfigKey.url(datasource: "primary"): "postgres://localhost:5432/app"
@@ -104,7 +104,7 @@ struct ModuleRegistrationTests {
         }
     }
 
-    /// §5.2 made structural: the module registers no transaction
+    /// Made structural: the module registers no transaction
     /// coordinator. (`@Transactional` on a Valkey-only repository has no
     /// coordinator to find and fails at runtime resolution — the honest
     /// alternative, `multi`, lives on the connection.)

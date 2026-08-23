@@ -2,9 +2,9 @@ import FlightDataValkey
 import Testing
 import Valkey
 
-/// The §5.2 batch builder, no server required: what a `multi` block queues.
+/// The batch builder, no server required: what a `multi` block queues.
 /// EXEC semantics (per-slot failures, atomicity) are integration territory.
-@Suite("Multi batch builder (§5.2)")
+@Suite("Multi batch builder")
 struct MultiBatchTests {
     @Test func designDocExampleQueuesIncrThenExpire() throws {
         var batch = ValkeyMultiBatch()

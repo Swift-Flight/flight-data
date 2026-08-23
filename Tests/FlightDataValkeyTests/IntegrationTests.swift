@@ -5,9 +5,9 @@ import FlightDataValkey
 import Testing
 import Valkey
 
-/// Umbrella for every suite that talks to a live server (design §8). Every
+/// Umbrella for every suite that talks to a live server. Every
 /// test is parameterized over each configured server — the same code runs
-/// against Valkey *and* Redis, which is what keeps §3.1's compatibility
+/// against Valkey *and* Redis, which is what keeps compatibility
 /// policy honest. `.serialized` is recursive, so nested suites never
 /// interleave — each test flushes the test database, which only works
 /// single-file.
@@ -17,7 +17,7 @@ enum ValkeyIntegrationSuite {}
 // MARK: - Pool lifecycle
 
 extension ValkeyIntegrationSuite {
-    @Suite("Pool lifecycle (§6, delta V1)")
+    @Suite("Pool lifecycle (delta V1)")
     struct PoolLifecycleTests {
         @Test(arguments: TestServer.available)
         func startEstablishesThePoolEagerly(_ server: TestServer) async throws {
@@ -34,7 +34,7 @@ extension ValkeyIntegrationSuite {
             try await withValkeyContainer(server) { container, source in
                 try await source.ping()
                 // The same probe Actuator reads, through the store-agnostic
-                // component (§4.1).
+                // component.
                 let probes = try DataSourceLiveness.all(in: container)
                 #expect(probes.count == 1)
                 try await probes[0].ping()
@@ -94,7 +94,7 @@ extension ValkeyIntegrationSuite {
 
         @Test(arguments: TestServer.available)
         func unreachableServerFailsStartPromptly(_ server: TestServer) async throws {
-            // Port 1 answers nothing; §6's posture is that bootstrap fails
+            // Port 1 answers nothing; posture is that bootstrap fails
             // before any request is served, not at first command.
             let settings = try DataSourceSettings(name: "primary", url: "valkey://127.0.0.1:1", poolSize: 2)
             let source = try ValkeyDataSource(settings: settings)
@@ -127,11 +127,11 @@ extension ValkeyIntegrationSuite {
 // MARK: - Scope-bound connections
 
 extension ValkeyIntegrationSuite {
-    /// §4.2's properties, which only a live pool can prove: scope-bound
+    /// properties, which only a live pool can prove: scope-bound
     /// checkout, connection identity within a scope, return-to-pool at scope
     /// close, and repositories wired through the real `@Repository`/
     /// `@Autowired` macro path.
-    @Suite("Scoped connections (§4.2)")
+    @Suite("Scoped connections")
     struct ScopingTests {
         @Test(arguments: TestServer.available)
         func scopeSharesOneConnection(_ server: TestServer) async throws {
@@ -184,7 +184,7 @@ extension ValkeyIntegrationSuite {
 
         @Test(arguments: TestServer.available)
         func repositoryStoresAndFindsSessions(_ server: TestServer) async throws {
-            // The design doc's §4.3 repository, end to end.
+            // The design doc's repository, end to end.
             try await withValkeyContainer(server) { container, source in
                 try await container.withScope { scope in
                     let repo = try container.resolve(SessionRepository.self, in: scope)
@@ -220,7 +220,7 @@ extension ValkeyIntegrationSuite {
 // MARK: - Typed commands, sugar, escape hatch
 
 extension ValkeyIntegrationSuite {
-    @Suite("Command surface (§4.3)")
+    @Suite("Command surface")
     struct CommandSurfaceTests {
         @Test(arguments: TestServer.available)
         func typedCommandsRoundTrip(_ server: TestServer) async throws {
@@ -254,7 +254,7 @@ extension ValkeyIntegrationSuite {
         func rawCommandEscapeHatch(_ server: TestServer) async throws {
             try await withValkeyContainer(server) { _, source in
                 try await source.withConnection { valkey in
-                    // Common-set commands through the raw path — the §4.3
+                    // Common-set commands through the raw path — the
                     // hatch itself is compatibility-neutral; what you send
                     // through it is your informed choice.
                     let payload = #"{"answer":42}"#
@@ -282,10 +282,10 @@ extension ValkeyIntegrationSuite {
     }
 }
 
-// MARK: - multi (§5.2)
+// MARK: - multi
 
 extension ValkeyIntegrationSuite {
-    @Suite("multi — atomic batches, not transactions (§5.2)")
+    @Suite("multi — atomic batches, not transactions")
     struct MultiTests {
         @Test(arguments: TestServer.available)
         func designDocBatchExecutesAtomically(_ server: TestServer) async throws {
@@ -307,7 +307,7 @@ extension ValkeyIntegrationSuite {
 
         @Test(arguments: TestServer.available)
         func executionFailureLandsInItsSlotAndNeighborsStillRan(_ server: TestServer) async throws {
-            // THE §5.2 semantics: no rollback. A command that fails at EXEC
+            // THE semantics: no rollback. A command that fails at EXEC
             // time fails alone; the commands around it are not undone.
             try await withValkeyContainer(server) { _, source in
                 try await source.withConnection { valkey in
@@ -354,10 +354,10 @@ extension ValkeyIntegrationSuite {
     }
 }
 
-// MARK: - Changeset apply (§5.3)
+// MARK: - Changeset apply
 
 extension ValkeyIntegrationSuite {
-    @Suite("Changeset apply (§5.3)")
+    @Suite("Changeset apply")
     struct ChangesetApplyTests {
         @Test(arguments: TestServer.available)
         func insertChangesetCreatesTheHash(_ server: TestServer) async throws {
@@ -399,11 +399,72 @@ extension ValkeyIntegrationSuite {
                         .decode(as: [String: String].self)
                     // Changed field written, nil field deleted, everything
                     // else — including fields the changeset never saw —
-                    // untouched: the minimal write §5.3 promises.
+                    // untouched: the minimal write promises.
                     #expect(
                         stored == [
                             "user_id": "7", "login_count": "4", "untouched": "still-here",
                         ])
+                }
+            }
+        }
+
+        @Test("a non-positive expiry is refused, not sent as a deletion",
+              arguments: TestServer.available)
+        func nonPositiveExpiryRefused(_ server: TestServer) async throws {
+            // `PEXPIRE` with a negative timeout deletes the key. A caller
+            // computing a TTL from a deadline that has already passed would
+            // have destroyed data by asking for an expiry.
+            try await withValkeyContainer(server) { _, source in
+                try await source.withConnection { valkey in
+                    _ = try await valkey.set("ttl:probe", value: "keep-me")
+
+                    await #expect(throws: ValkeyCommandError.self) {
+                        _ = try await valkey.expire("ttl:probe", after: .seconds(-5))
+                    }
+                    await #expect(throws: ValkeyCommandError.self) {
+                        _ = try await valkey.expire("ttl:probe", after: .zero)
+                    }
+
+                    #expect(
+                        try await valkey.exists(keys: ["ttl:probe"]) == 1,
+                        "the key must still be there")
+                    _ = try await valkey.del(keys: ["ttl:probe"])
+                }
+            }
+        }
+
+        @Test(
+            "a failed command inside the transaction is reported, not swallowed",
+            arguments: TestServer.available)
+        func transactionCommandFailureSurfaces(_ server: TestServer) async throws {
+            // `transaction` returns per-command results, and they were
+            // discarded: a MULTI the server accepted whose commands failed
+            // inside it reported success while writing nothing.
+            //
+            // The asymmetry was the sharp edge. A changeset with no nils takes
+            // the single-command path, which throws. One that nils a field
+            // takes the MULTI path, which did not. Same logical write, and
+            // whether a failure was visible depended only on that.
+            try await withValkeyContainer(server) { _, source in
+                try await source.withConnection { valkey in
+                    // Occupy the key with a string, so a hash command against
+                    // it is a WRONGTYPE error.
+                    _ = try await valkey.set("session:wrong", value: "not-a-hash")
+
+                    let original = Session(id: "wrong", userID: 1, ipAddress: "10.0.0.1", loginCount: 1)
+                    // Nils a field *and* sets one: both HSET and HDEL, so the
+                    // write goes through MULTI.
+                    let changeset = Changeset(original: original)
+                        .change(\.loginCount, 2)
+                        .change(\.ipAddress, nil)
+
+                    await #expect(throws: ValkeyChangesetError.self) {
+                        try await valkey.apply(
+                            try changeset.validatedChanges(), to: Session.self)
+                    }
+
+                    // And the key is untouched — still the string it was.
+                    _ = try await valkey.del(keys: ["session:wrong"])
                 }
             }
         }
@@ -422,7 +483,7 @@ extension ValkeyIntegrationSuite {
 
         @Test(arguments: TestServer.available)
         func invalidChangesetCannotReachTheDriver(_ server: TestServer) async throws {
-            // The §5.3 boundary is structural: validatedChanges() throws, so
+            // The boundary is structural: validatedChanges() throws, so
             // there is no ValidatedChanges to apply.
             let changeset = Changeset(Session.self)
                 .change(\.id, "x")

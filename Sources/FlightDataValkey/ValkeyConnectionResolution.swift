@@ -2,7 +2,7 @@ import FlightCore
 import FlightDataCore
 import Valkey
 
-/// Makes design §4.3's repository shape work as written:
+/// Makes design repository shape work as written:
 ///
 /// ```swift
 /// @Repository(scope: .scoped)
@@ -13,7 +13,7 @@ import Valkey
 /// ```
 ///
 /// `@Autowired` expands to plain `container.resolve(ValkeyConnection.self)`
-/// (Flight Core §5.1), and Core's generic `resolve` refuses scoped
+/// (Flight Core), and Core's generic `resolve` refuses scoped
 /// components — scoped resolution needs a scope. These overloads are *more
 /// specific* than the generic one, so in any module that imports
 /// FlightDataValkey they win overload resolution for exactly the two

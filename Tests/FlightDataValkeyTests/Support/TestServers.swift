@@ -5,10 +5,10 @@ import FlightDataTesting
 import FlightDataValkey
 import Testing
 
-/// Integration tests run against a real server (design §8) — the value of
+/// Integration tests run against a real server — the value of
 /// this package is real commands against a real server; mocking the
 /// connection would test nothing meaningful. And they run against **both
-/// Valkey and Redis** — that's what keeps §3.1's compatibility policy honest
+/// Valkey and Redis** — that's what keeps compatibility policy honest
 /// rather than aspirational. Each server is gated on its own variable:
 ///
 /// ```
@@ -20,7 +20,7 @@ import Testing
 /// ```
 ///
 /// Integration suites are parameterized over every configured server — one
-/// code path, two servers, per §3.1 (no detection logic, no dual paths).
+/// code path, two servers, per (no detection logic, no dual paths).
 /// Without either variable they are skipped and only the no-server unit
 /// tests run.
 enum TestServer: String, CaseIterable, Sendable, CustomStringConvertible {

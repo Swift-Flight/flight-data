@@ -1,7 +1,7 @@
 import Foundation
 import FlightDataValkey
 
-// MARK: - Model (changeset design §5.3)
+// MARK: - Model (changeset design)
 
 /// The design doc's example entity, as a hand-conformed `TableModel` —
 /// exactly the metadata the changeset seam needs, nothing more (Flight Data
@@ -24,9 +24,9 @@ struct Session: TableModel, Equatable {
     ]
 }
 
-// MARK: - Repository (design §4.3)
+// MARK: - Repository
 
-/// The design doc's §4.3 repository, executable: typed commands against the
+/// The design doc's repository, executable: typed commands against the
 /// scope's connection, resolved through the real `@Repository`/`@Autowired`
 /// macro path.
 @Repository(scope: .scoped)

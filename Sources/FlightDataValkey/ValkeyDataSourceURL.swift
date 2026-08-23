@@ -2,7 +2,7 @@ import Foundation
 import NIOSSL
 import Valkey
 
-/// The parsed form of `datasource.<name>.url` (design §3.2) — Flight Data
+/// The parsed form of `datasource.<name>.url` — Flight Data
 /// Core hands the URL over uninterpreted; this package parses it, and a
 /// malformed URL fails at pool construction (freeze()'s eager singleton
 /// construction), never at the first command.
@@ -10,12 +10,12 @@ import Valkey
 /// Accepted shapes:
 ///
 ///     valkey://localhost:6379
-///     redis://localhost:6379            // same client, same behavior (§3)
+///     redis://localhost:6379            // same client, same behavior
 ///     valkey://:secret@host:6379/2      // password-only auth, database 2
 ///     rediss://user:secret@host:6380    // TLS variant (valkeys:// likewise)
 ///
 /// `valkey://` and `redis://` are exact synonyms, as are `valkeys://` and
-/// `rediss://` — the §3 seamlessness story is precisely that the scheme
+/// `rediss://` — the seamlessness story is precisely that the scheme
 /// names a *compatible pair*, not a behavior switch. No detection logic, no
 /// dual code paths.
 public struct ValkeyDataSourceURL: Sendable, Equatable {

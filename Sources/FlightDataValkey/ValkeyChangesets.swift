@@ -3,7 +3,7 @@ import FlightDataCore
 import NIOCore
 import Valkey
 
-/// The Valkey driver obligation of the changeset design (§5.3): one
+/// The Valkey driver obligation of the changeset design: one
 /// `apply(_:to:)` translating the neutral `ValidatedChanges` into this
 /// store's native write — an `HSET` of exactly the changed fields (plus an
 /// `HDEL` for fields set to nil, since a hash expresses "no value" by
@@ -11,7 +11,7 @@ import Valkey
 /// Core; an invalid changeset structurally cannot reach this code
 /// (`validatedChanges()` throws).
 ///
-/// This is the §5.3 evidence in code: the same `ValidatedChanges` that the
+/// This is the evidence in code: the same `ValidatedChanges` that the
 /// Postgres driver turns into `UPDATE … SET` becomes an `HSET` here, with no
 /// shared write logic and no per-store changeset variant.
 extension ValkeyClientProtocol {
@@ -47,9 +47,38 @@ extension ValkeyClientProtocol {
         case (true, false):
             _ = try await execute(HDEL(hashKey, fields: plan.deletes))
         case (false, false):
-            _ = try await transaction([HSET(hashKey, data: sets), HDEL(hashKey, fields: plan.deletes)])
+            // `transaction` reports per-command outcomes: a MULTI that a
+            // server accepts can still have individual commands fail inside
+            // it. Discarding that array — which is what `_ = try await` did
+            // — made this path return success while writing nothing.
+            //
+            // The asymmetry was the worst part. The single-command paths
+            // above surface a failure by throwing, so the *same* logical
+            // write threw or vanished silently depending only on whether the
+            // changeset happened to contain a nil, which is what decides
+            // whether there are deletes and therefore whether the write goes
+            // through MULTI at all.
+            let results = try await transaction([
+                HSET(hashKey, data: sets), HDEL(hashKey, fields: plan.deletes),
+            ])
+            try Self.requireAllSucceeded(results, key: plan.key)
         case (true, true):
             return  // unreachable: plan is nil when nothing changed
+        }
+    }
+
+    /// Throws on the first failed command in a transaction's results.
+    ///
+    /// Reports which command index failed, because "the write did not happen"
+    /// is a much less useful thing to learn than "the HDEL failed".
+    static func requireAllSucceeded(
+        _ results: [Result<RESPToken, ValkeyClientError>], key: String
+    ) throws {
+        for (index, result) in results.enumerated() {
+            if case .failure(let error) = result {
+                throw ValkeyChangesetError.commandFailed(
+                    key: key, commandIndex: index, reason: String(describing: error))
+            }
         }
     }
 }
@@ -218,6 +247,10 @@ public enum ValkeyChangesetError: Error, Sendable, Equatable, CustomStringConver
     /// An insert changeset (no identity) did not change some primary-key
     /// column, so no hash key can be derived.
     case missingKeyField(model: String, column: String)
+    /// One command inside a transaction failed. The transaction as a whole
+    /// was accepted by the server; this command within it was not, so the
+    /// write did not fully land.
+    case commandFailed(key: String, commandIndex: Int, reason: String)
 
     public var description: String {
         switch self {
@@ -225,6 +258,8 @@ public enum ValkeyChangesetError: Error, Sendable, Equatable, CustomStringConver
             return "Changeset field '\(field)' has type \(type), which the Valkey driver cannot render. Store it as one of the supported column types (String, integers, Double, Bool, UUID, Date, Decimal, Data)."
         case .missingKeyField(let model, let column):
             return "Cannot derive a hash key for \(model): primary-key column '\(column)' is neither in the changeset's identity nor among its changed fields. Set it in the changeset, or pass an explicit key to apply(_:to:key:)."
+        case .commandFailed(let key, let index, let reason):
+            return "Writing changes to '\(key)' failed: command \(index) in the transaction reported \(reason). The write did not fully land."
         }
     }
 }

@@ -1,10 +1,10 @@
 import FlightDataValkey
 import Testing
 
-/// §3.2's URL convention, no server required. The load-bearing assertion is
+/// URL convention, no server required. The load-bearing assertion is
 /// the first one: `valkey://` and `redis://` parse to the *same* value —
-/// §3's seamlessness is a compatible pair, not a behavior switch.
-@Suite("Datasource URL parsing (§3.2)")
+/// seamlessness is a compatible pair, not a behavior switch.
+@Suite("Datasource URL parsing")
 struct URLParsingTests {
     @Test func valkeyAndRedisSchemesAreSynonyms() throws {
         let valkey = try ValkeyDataSourceURL.parse("valkey://localhost:6379", datasource: "primary")

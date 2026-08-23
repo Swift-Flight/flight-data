@@ -1,8 +1,8 @@
 // swift-tools-version: 6.1
 // Flight Data Valkey — Valkey (and Redis) as a first-class Flight data store:
 // typed access to its data structures, scope-bound connections, and
-// repository-layer integration. Implements ../flight-data-valkey-design.md;
-// see README.md for the design deltas discovered during implementation.
+// repository-layer integration. See README.md for the decisions made
+// during implementation.
 import PackageDescription
 
 let package = Package(
@@ -15,8 +15,8 @@ let package = Package(
     ],
     products: [
         // The Flight package: ValkeyDataSource (the pool), ValkeyDataModule,
-        // the `multi` batch (§5.2), the raw-command escape hatch (§4.3), and
-        // changeset apply (§5.3).
+        // the `multi` batch, the raw-command escape hatch, and
+        // changeset apply.
         .library(name: "FlightDataValkey", targets: ["FlightDataValkey"])
     ],
     dependencies: [
@@ -24,7 +24,7 @@ let package = Package(
         // DataSource seam this package plugs into.
         .package(path: "../../Core/flight-core"),
         .package(path: "../../Data/flight-data-core"),
-        // The driver (§2): valkey-swift — concurrency-native, Valkey/Redis
+        // The driver: valkey-swift — concurrency-native, Valkey/Redis
         // compatible, command coverage generated from Valkey's own command
         // specifications. NOT RediStack (deprecated, pre-concurrency).
         .package(url: "https://github.com/valkey-io/valkey-swift.git", from: "1.4.0"),

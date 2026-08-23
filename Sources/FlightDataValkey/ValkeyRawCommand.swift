@@ -1,16 +1,16 @@
 import Valkey
 
-/// The escape hatch (design §4.3): a raw command for anything the typed
+/// The escape hatch: a raw command for anything the typed
 /// surface doesn't cover — vendor-specific commands, newly-added server
 /// commands, module commands.
 ///
 /// ```swift
-/// try await valkey.command("JSON.SET", "doc:1", "$", jsonPayload)   // Redis-only; §3.1 applies
+/// try await valkey.command("JSON.SET", "doc:1", "$", jsonPayload)   // Redis-only; applies
 /// ```
 ///
 /// First-class, not a leak — no client can wrap every command of two
 /// diverging servers. But it is **outside Flight's compatibility guarantee**
-/// (§3.1): the typed surface sticks to the common command set that runs on
+///: the typed surface sticks to the common command set that runs on
 /// both Valkey and Redis; a raw command is an informed choice to send
 /// whatever you typed, and pinning to one server's vendor-specific commands
 /// is exactly the cost the design doc says it is.
@@ -37,7 +37,7 @@ extension ValkeyClientProtocol {
     }
 }
 
-/// §4.3's raw command as a `ValkeyCommand` value — usable anywhere a typed
+/// raw command as a `ValkeyCommand` value — usable anywhere a typed
 /// command is: `execute`, pipelines, and `multi` batches.
 public struct ValkeyRawCommand: ValkeyCommand {
     public typealias Response = RESPToken
