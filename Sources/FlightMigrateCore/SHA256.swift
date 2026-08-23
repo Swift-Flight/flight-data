@@ -1,6 +1,6 @@
 /// A small, pure-Swift SHA-256 (FIPS 180-4) used for migration checksums.
 ///
-/// Flight Migrate hashes migration *source text* to detect drift (design §5) — a content
+/// Flight Migrate hashes migration *source text* to detect drift — a content
 /// fingerprint, not a security boundary. Implementing the hash here keeps
 /// `FlightMigrateCore` dependency-free, which matters because the build-tool executable
 /// (`flight-migrate-gen`) links this module and is compiled for the *host* machine on

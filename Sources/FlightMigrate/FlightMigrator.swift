@@ -2,7 +2,7 @@ import Foundation
 import Logging
 import PostgresNIO
 
-/// The migration runner (design §3, §7.2).
+/// The migration runner.
 ///
 /// ```swift
 /// let migrator = FlightMigrator(client: postgresClient, migrations: _allMigrations())
@@ -12,16 +12,16 @@ import PostgresNIO
 /// Guarantees:
 /// - Each wrapped migration runs in its own transaction **together with its bookkeeping
 ///   write**: a failure rolls back both, leaving the database byte-for-byte where it
-///   started (§3.1).
+///   started.
 /// - The whole run holds a Postgres advisory lock, so concurrent instances serialize;
-///   latecomers find nothing pending (§6).
+///   latecomers find nothing pending.
 /// - Already-applied migrations are verified against their recorded checksums before
-///   anything runs; drift is a hard error (§5).
+///   anything runs; drift is a hard error.
 ///
-/// Deliberately **not** run at boot for you (§7): schema changes are a deploy step, not a
+/// Deliberately **not** run at boot for you: schema changes are a deploy step, not a
 /// side effect of a process starting. Call it from your migrate binary or test harness.
 public struct FlightMigrator: Sendable {
-    /// The constant advisory lock key (design §6): the ASCII bytes `"FLIGHTMG"` as a
+    /// The constant advisory lock key: the ASCII bytes `"FLIGHTMG"` as a
     /// big-endian `Int64`. Override via ``Configuration/advisoryLockKey`` if it collides
     /// with an advisory-lock scheme your application already uses.
     public static let defaultAdvisoryLockKey = Int64(0x464C_4947_4854_4D47)
@@ -32,6 +32,18 @@ public struct FlightMigrator: Sendable {
 
         /// Advisory lock key held for the duration of every mutating run.
         public var advisoryLockKey: Int64
+
+        /// How long to wait for the advisory lock before giving up.
+        ///
+        /// A migration run holds a session-scoped advisory lock so two
+        /// deploys cannot migrate the same database at once. Without a bound,
+        /// a run that cannot get the lock — because another run is wedged, or
+        /// a session leaked it — waits forever, and a deploy that never
+        /// finishes is harder to diagnose than one that fails.
+        ///
+        /// `nil` waits indefinitely, which is the old behavior and still the
+        /// right choice for an interactive run you are watching.
+        public var lockTimeout: Duration?
 
         /// If `true`, versions recorded as applied that this binary doesn't know about are
         /// a hard error. The default (`false`) warns and proceeds, because an older binary
@@ -47,12 +59,14 @@ public struct FlightMigrator: Sendable {
         public init(
             migrationsTable: String = "flight_migrations",
             advisoryLockKey: Int64 = FlightMigrator.defaultAdvisoryLockKey,
+            lockTimeout: Duration? = .seconds(30),
             failOnUnknownApplied: Bool = false,
             logger: Logger = Logger(label: "flight-migrate"),
             onEvent: (@Sendable (MigrationEvent) -> Void)? = nil
         ) {
             self.migrationsTable = migrationsTable
             self.advisoryLockKey = advisoryLockKey
+            self.lockTimeout = lockTimeout
             self.failOnUnknownApplied = failOnUnknownApplied
             self.logger = logger
             self.onEvent = onEvent
@@ -139,7 +153,7 @@ public struct FlightMigrator: Sendable {
 
     // MARK: - Rollback
 
-    /// Reverts the most recently applied migration(s) (design §3.3). `steps` may exceed
+    /// Reverts the most recently applied migration(s). `steps` may exceed
     /// the number of applied migrations; everything applied is then reverted.
     @discardableResult
     public func rollback(steps: Int = 1) async throws -> [RolledBackMigration] {
@@ -214,7 +228,7 @@ public struct FlightMigrator: Sendable {
     // MARK: - Repair
 
     /// Re-baselines recorded checksums (and names) to the currently registered values,
-    /// for applied migrations whose source was edited in a confirmed-safe way (design §5).
+    /// for applied migrations whose source was edited in a confirmed-safe way.
     /// All updates commit atomically. Rows with no registered migration are reported, not
     /// touched.
     @discardableResult
@@ -298,7 +312,8 @@ public struct FlightMigrator: Sendable {
         _ body: @Sendable (any MigrationSession) async throws -> T
     ) async throws -> T {
         try await database.withSession { session in
-            try await session.acquireAdvisoryLock(key: configuration.advisoryLockKey)
+            try await session.acquireAdvisoryLock(
+                key: configuration.advisoryLockKey, timeout: configuration.lockTimeout)
             do {
                 let result = try await body(session)
                 do {
@@ -318,7 +333,7 @@ public struct FlightMigrator: Sendable {
         }
     }
 
-    /// Creates the bookkeeping table if needed, inside a transaction (design §4).
+    /// Creates the bookkeeping table if needed, inside a transaction.
     private func ensureLedger(_ session: any MigrationSession) async throws {
         guard try await !session.migrationsTableExists(configuration.migrationsTable) else {
             return
@@ -344,7 +359,7 @@ public struct FlightMigrator: Sendable {
         return try await session.fetchApplied(configuration.migrationsTable)
     }
 
-    /// Checksum verification for every applied migration (design §5), plus the
+    /// Checksum verification for every applied migration, plus the
     /// unknown-applied policy.
     private func verifyIntegrity(
         applied: [AppliedMigrationRecord], entries: [MigrationEntry]
@@ -385,7 +400,7 @@ public struct FlightMigrator: Sendable {
         return schema.statements
     }
 
-    /// Runs one migration in the given direction — the transactional core (design §3).
+    /// Runs one migration in the given direction — the transactional core.
     private func run(
         _ entry: MigrationEntry, direction: MigrationDirection, in session: any MigrationSession
     ) async throws -> AppliedMigration {
@@ -523,6 +538,11 @@ public struct FlightMigrator: Sendable {
         let byVersion = Dictionary(uniqueKeysWithValues: entries.map { ($0.version, $0) })
         return try await withLockedSession { session in
             let applied = try await fetchAppliedIfLedgerExists(session)
+            // Rolling back is as destructive as migrating forward, so the same
+            // integrity gate applies: a ledger holding versions this binary does
+            // not know about means the local set and the database disagree, and
+            // `failOnUnknownApplied` is how an operator says to stop there.
+            try verifyIntegrity(applied: applied, entries: entries)
             let targets = try selectTargets(applied)
             guard !targets.isEmpty else {
                 configuration.logger.info("nothing to roll back")

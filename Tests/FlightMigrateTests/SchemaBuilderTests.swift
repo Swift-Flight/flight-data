@@ -262,14 +262,36 @@ struct IndexTests {
         )
     }
 
-    @Test func concurrentIndexes() {
+    @Test("a concurrent build defaults to IF NOT EXISTS so a retry can make progress")
+    func concurrentIndexes() {
         let schema = SchemaBuilder()
         schema.createIndex(on: "users", columns: ["email"], concurrently: true)
         schema.dropIndex("users_email_idx", concurrently: true, ifExists: true)
+        // A failed CONCURRENTLY build strands an INVALID index under this name,
+        // and the migration was not in a transaction, so nothing rolled it back.
+        // Without IF NOT EXISTS the retry dies on "relation already exists".
+        #expect(
+            schema.statements[0]
+                == "CREATE INDEX CONCURRENTLY IF NOT EXISTS \"users_email_idx\" ON \"users\" (\"email\")")
+        #expect(schema.statements[1] == "DROP INDEX CONCURRENTLY IF EXISTS \"users_email_idx\"")
+    }
+
+    @Test("the concurrent IF NOT EXISTS default can be declined explicitly")
+    func concurrentIndexOptOut() {
+        let schema = SchemaBuilder()
+        schema.createIndex(on: "users", columns: ["email"], concurrently: true, ifNotExists: false)
         #expect(
             schema.statements[0]
                 == "CREATE INDEX CONCURRENTLY \"users_email_idx\" ON \"users\" (\"email\")")
-        #expect(schema.statements[1] == "DROP INDEX CONCURRENTLY IF EXISTS \"users_email_idx\"")
+    }
+
+    @Test("a non-concurrent build still defaults to plain CREATE INDEX")
+    func nonConcurrentIndexUnchanged() {
+        let schema = SchemaBuilder()
+        schema.createIndex(on: "users", columns: ["email"])
+        #expect(
+            schema.statements[0]
+                == "CREATE INDEX \"users_email_idx\" ON \"users\" (\"email\")")
     }
 
     @Test func indexNameStripsSchemaQualification() {

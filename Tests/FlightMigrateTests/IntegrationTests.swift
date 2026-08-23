@@ -70,7 +70,7 @@ struct ITAlterUsers: Migration {
     }
 }
 
-/// Second statement fails: the first must be rolled back atomically (§3.1).
+/// Second statement fails: the first must be rolled back atomically.
 struct ITFailsAtomically: Migration {
     func up(_ schema: SchemaBuilder) {
         schema.createTable("it_atomic") { t in
@@ -83,7 +83,7 @@ struct ITFailsAtomically: Migration {
     }
 }
 
-/// The §3.2 flagship: CONCURRENTLY, which Postgres refuses inside a transaction block.
+/// CONCURRENTLY, which Postgres refuses inside a transaction block.
 struct ITConcurrentIndex: Migration {
     static let wrapInTransaction = false
     func up(_ schema: SchemaBuilder) {
@@ -95,7 +95,7 @@ struct ITConcurrentIndex: Migration {
 }
 
 /// A CONCURRENTLY build that fails (unique index over duplicate data) leaves an INVALID
-/// index behind — the manual-intervention case §3.2 documents.
+/// index behind — the documented manual-intervention case.
 struct ITBadConcurrentIndex: Migration {
     static let wrapInTransaction = false
     func up(_ schema: SchemaBuilder) {
@@ -163,8 +163,20 @@ func tableExists(_ client: PostgresClient, _ name: String) async throws -> Bool 
     try await scalarBool(client, "SELECT to_regclass('\(name)') IS NOT NULL")
 }
 
-/// A quiet migrator configuration with a per-ledger advisory lock key so tests can't
-/// interfere with each other even across runs.
+/// A quiet migrator configuration whose ledger and advisory-lock key are unique to
+/// this process.
+///
+/// Two migration runs against one database serialize on the advisory lock. That is
+/// the correct production behavior, but in a test suite it turns an accidental
+/// overlap — CI running while someone runs the suite locally against the same
+/// server — into contention rather than a clean failure. Deriving the key from a
+/// per-process ledger name keeps separate runs off each other's lock entirely.
+///
+/// This does **not** make the suite safe to run twice against one database: the
+/// fixture *tables* are still shared, and the suite drops and recreates them. Use a
+/// dedicated throwaway Postgres, which is what CI does. The `lockTimeout` default
+/// means an accidental overlap now fails in seconds with an actionable message
+/// instead of blocking forever.
 func testConfiguration(ledger: String) -> FlightMigrator.Configuration {
     var logger = Logger(label: "flight-migrate-test")
     logger.logLevel = .error
@@ -175,6 +187,19 @@ func testConfiguration(ledger: String) -> FlightMigrator.Configuration {
     return FlightMigrator.Configuration(
         migrationsTable: ledger, advisoryLockKey: key, logger: logger)
 }
+
+/// A ledger name unique to this process, so two concurrent runs never share a
+/// ledger table or — since the lock key is derived from it — an advisory lock.
+func scopedLedger(_ name: String) -> String {
+    "it_ledger_\(name)_\(testRunSuffix)"
+}
+
+/// Unique per process, so two concurrent runs never share a ledger or a lock key.
+let testRunSuffix: String = {
+    let pid = ProcessInfo.processInfo.processIdentifier
+    let random = UInt32.random(in: 0..<0xFFFF)
+    return String(format: "%d_%04x", pid, random)
+}()
 
 func cleanup(_ client: PostgresClient, ledger: String, tables: [String]) async throws {
     for table in tables {
@@ -191,7 +216,7 @@ func cleanup(_ client: PostgresClient, ledger: String, tables: [String]) async t
 struct IntegrationTests {
     @Test func applyStatusRollbackEndToEnd() async throws {
         try await withTestClient { client in
-            let ledger = "it_ledger_e2e"
+            let ledger = scopedLedger("e2e")
             let tables = ["it_team_members", "it_teams", "it_users"]
             try await cleanup(client, ledger: ledger, tables: tables)
 
@@ -254,7 +279,7 @@ struct IntegrationTests {
 
     @Test func failedWrappedMigrationLeavesNoTrace() async throws {
         try await withTestClient { client in
-            let ledger = "it_ledger_atomic"
+            let ledger = scopedLedger("atomic")
             try await cleanup(client, ledger: ledger, tables: ["it_atomic", "it_users"])
 
             let migrations = [
@@ -293,7 +318,7 @@ struct IntegrationTests {
 
     @Test func checksumDriftHaltsAndRepairRebaselines() async throws {
         try await withTestClient { client in
-            let ledger = "it_ledger_drift"
+            let ledger = scopedLedger("drift")
             try await cleanup(client, ledger: ledger, tables: ["it_users"])
 
             let original = [entry(1, "ITCreateUsers", ITCreateUsers.self)]
@@ -336,7 +361,7 @@ struct IntegrationTests {
 
     @Test func concurrentIndexBuildsOutsideTransaction() async throws {
         try await withTestClient { client in
-            let ledger = "it_ledger_concurrent"
+            let ledger = scopedLedger("concurrent")
             try await cleanup(client, ledger: ledger, tables: ["it_users"])
 
             let migrations = [
@@ -373,11 +398,11 @@ struct IntegrationTests {
 
     @Test func failedConcurrentIndexRequiresManualInterventionThenRetries() async throws {
         try await withTestClient { client in
-            let ledger = "it_ledger_invalid"
+            let ledger = scopedLedger("invalid")
             try await cleanup(client, ledger: ledger, tables: ["it_dupes"])
 
             // Duplicate data makes the unique CONCURRENTLY build fail after creating an
-            // INVALID index — exactly the §3.2 scenario.
+            // INVALID index — exactly the documented scenario.
             try await exec(client, "CREATE TABLE it_dupes (v int)")
             try await exec(client, "INSERT INTO it_dupes VALUES (1), (1)")
 
@@ -394,7 +419,7 @@ struct IntegrationTests {
                 #expect(error.description.contains("INVALID index"))
             }
 
-            // The version was not recorded (§3.2c), and Postgres left an INVALID index.
+            // The version was not recorded, and Postgres left an INVALID index.
             #expect(try await scalarInt(client, "SELECT count(*) FROM \(ledger)") == 0)
             #expect(
                 try await scalarBool(
@@ -417,7 +442,7 @@ struct IntegrationTests {
 
     @Test func advisoryLockSerializesConcurrentMigrators() async throws {
         try await withTestClient { client in
-            let ledger = "it_ledger_race"
+            let ledger = scopedLedger("race")
             let tables = ["it_team_members", "it_teams", "it_users"]
             try await cleanup(client, ledger: ledger, tables: tables)
 
@@ -427,7 +452,7 @@ struct IntegrationTests {
                 entry(3, "ITAlterUsers", ITAlterUsers.self),
             ]
 
-            // Simulate a fleet: several instances migrate at startup simultaneously (§6).
+            // Simulate a fleet: several instances migrate at startup simultaneously.
             let totalApplied = try await withThrowingTaskGroup(
                 of: Int.self, returning: Int.self
             ) { group in

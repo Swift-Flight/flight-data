@@ -24,9 +24,9 @@ struct MigratorMigrateTests {
             ops == [
                 .acquireLock(lockKey),
                 .tableExists,
-                .begin, .createTable, .commit,  // ledger creation, inside a transaction (§4)
+                .begin, .createTable, .commit,  // ledger creation, inside a transaction
                 .fetchApplied,
-                // CreateAlpha: body + bookkeeping inside one transaction (§3.1)
+                // CreateAlpha: body + bookkeeping inside one transaction
                 .begin,
                 .execute("CREATE TABLE \"alpha\" (\n    \"x\" INTEGER NOT NULL\n)"),
                 .insert(1),
@@ -187,7 +187,7 @@ struct MigratorMigrateTests {
                 .insert(1),
                 .releaseLock(lockKey),
             ])
-        // Multi-statement unwrapped migration warns (§3.2).
+        // Multi-statement unwrapped migration warns.
         #expect(
             events.events.contains {
                 if case .unwrappedMigrationHasMultipleStatements(_, _, 2, .up) = $0 { return true }
@@ -247,7 +247,7 @@ struct MigratorMigrateTests {
             }
             #expect(version == 1)
             #expect(name == "CreateAlpha")
-            // Design §5's exact wording.
+            // The exact operator-facing wording.
             #expect(
                 error.description.contains(
                     """

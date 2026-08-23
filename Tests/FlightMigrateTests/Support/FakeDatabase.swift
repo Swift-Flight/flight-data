@@ -103,7 +103,7 @@ actor FakeDatabase: MigrationDatabase, MigrationSession {
         stagedRows = nil
     }
 
-    func acquireAdvisoryLock(key: Int64) async throws {
+    func acquireAdvisoryLock(key: Int64, timeout: Duration?) async throws {
         try record(.acquireLock(key))
         guard heldLocks.insert(key).inserted else {
             throw StateError(description: "advisory lock \(key) acquired twice on one session")

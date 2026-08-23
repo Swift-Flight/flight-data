@@ -1,4 +1,4 @@
-/// Computes the drift-detection checksum for a migration (design §5).
+/// Computes the drift-detection checksum for a migration.
 ///
 /// The checksum is captured at **build time** by `flight-migrate-gen` from the migration's
 /// source file, embedded in the generated `_allMigrations()` registry, and stored in the
@@ -13,7 +13,7 @@
 /// to `\n`. Line-ending normalization means a CRLF/LF difference between checkouts (for
 /// example `git core.autocrlf` on different machines) is not reported as drift; any other
 /// byte difference — including whitespace and comments — is. The design errs toward
-/// halting and asking (§5): semantic-equivalence cleverness is deliberately out of scope.
+/// halting and asking: semantic-equivalence cleverness is deliberately out of scope.
 ///
 /// The `<version>_<name>` line ties the checksum to the migration's identity, so renaming
 /// a migration file (which changes the recorded name without touching its contents) is

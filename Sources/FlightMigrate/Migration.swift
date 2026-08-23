@@ -1,4 +1,4 @@
-/// A single schema migration: `up` and `down` together in one file (design §2.1).
+/// A single schema migration: `up` and `down` together in one file.
 ///
 /// Migrations are discovered at build time by `FlightMigratePlugin`, which generates an
 /// ordered `_allMigrations()` registry for the target. A migration's identity is its
@@ -24,7 +24,7 @@
 /// `up`/`down` do not touch the database: they *describe* the migration by recording
 /// statements on the ``SchemaBuilder``. `FlightMigrator` renders and executes those
 /// statements — by default inside a transaction together with the bookkeeping write, so
-/// a failed migration rolls back completely (design §3.1).
+/// a failed migration rolls back completely.
 public protocol Migration: Sendable {
     /// Migrations must be trivially constructible; the runner instantiates them on demand.
     /// Stateless structs satisfy this automatically.
@@ -33,7 +33,7 @@ public protocol Migration: Sendable {
     /// Whether the migration body runs inside a transaction (default `true`).
     ///
     /// Set to `false` only for operations Postgres refuses to run in a transaction block —
-    /// `CREATE INDEX CONCURRENTLY`, `ALTER TYPE ... ADD VALUE`, and friends (design §3.2).
+    /// `CREATE INDEX CONCURRENTLY`, `ALTER TYPE ... ADD VALUE`, and friends.
     /// An unwrapped migration that fails partway **cannot** be rolled back automatically;
     /// keep such migrations to a single statement.
     static var wrapInTransaction: Bool { get }
@@ -43,7 +43,7 @@ public protocol Migration: Sendable {
 
     /// Describe how to revert `up`. Flight Migrate runs whatever you write here and does
     /// not pretend irreversible changes (e.g. a dropped column's data) are reversible
-    /// (design §9). Leave empty for deliberately irreversible migrations.
+    ///. Leave empty for deliberately irreversible migrations.
     func down(_ schema: SchemaBuilder)
 }
 

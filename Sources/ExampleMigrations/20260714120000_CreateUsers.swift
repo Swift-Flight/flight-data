@@ -1,6 +1,6 @@
 import FlightMigrate
 
-// The design document's canonical example (§2).
+// The design document's canonical example.
 struct CreateUsers: Migration {
     func up(_ schema: SchemaBuilder) {
         schema.createTable("users") { t in

@@ -1,5 +1,5 @@
 /// Parsing and validation of migration filenames: `<14-digit UTC timestamp>_<TypeName>.swift`,
-/// e.g. `20260714120000_CreateUsers.swift` (design §2, §7.1).
+/// e.g. `20260714120000_CreateUsers.swift`.
 public enum MigrationFilename {
     /// A successfully parsed migration filename.
     public struct Parsed: Equatable, Sendable {
@@ -29,7 +29,7 @@ public enum MigrationFilename {
     ///
     /// The rule: a `.swift` file whose name starts with a digit **must** be a well-formed
     /// migration filename — anything else in the target is ignored as helper code. This is
-    /// what makes a hand-mangled or merge-conflicted prefix a build-time error (§7.1)
+    /// what makes a hand-mangled or merge-conflicted prefix a build-time error
     /// instead of a silently unregistered migration.
     public static func classify(_ filename: String) -> Classification {
         guard filename.hasSuffix(".swift") else { return .notAMigration }

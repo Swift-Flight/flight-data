@@ -3,7 +3,7 @@
 /// Each action renders as its own `ALTER TABLE` statement, in declaration order. That
 /// keeps the emitted SQL predictable and lets actions Postgres won't combine (like
 /// `RENAME COLUMN`) sit next to ones it would; inside a wrapped migration they are all
-/// atomic anyway (design §3.1).
+/// atomic anyway.
 ///
 /// Column constructors (`t.text("bio")`, `t.jsonb("prefs")`, ...) mean `ADD COLUMN` here:
 ///

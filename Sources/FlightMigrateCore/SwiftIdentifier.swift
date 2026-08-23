@@ -1,4 +1,4 @@
-/// Validation of migration type names (design §7.1: "the CLI rejects names that aren't
+/// Validation of migration type names ("the CLI rejects names that aren't
 /// valid identifiers rather than silently mangling them").
 public enum SwiftIdentifier {
     /// Swift reserved keywords that cannot be used as a bare type name. Contextual

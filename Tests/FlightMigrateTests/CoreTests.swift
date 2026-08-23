@@ -68,7 +68,7 @@ struct ChecksumTests {
     }
 
     @Test func identityIsPartOfTheChecksum() {
-        // Renaming a file (same contents, new name or version) must read as drift (§5).
+        // Renaming a file (same contents, new name or version) must read as drift.
         let original = MigrationChecksum.compute(version: 1, name: "M", source: "a")
         #expect(MigrationChecksum.compute(version: 2, name: "M", source: "a") != original)
         #expect(MigrationChecksum.compute(version: 1, name: "N", source: "a") != original)

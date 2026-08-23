@@ -2,7 +2,7 @@ import Foundation
 import NIOSSL
 import PostgresNIO
 
-/// Parses `postgres://` connection URLs into `PostgresClient` configurations (design §8:
+/// Parses `postgres://` connection URLs into `PostgresClient` configurations (
 /// the CLI reads a connection URL directly — env var or flag — precisely so Flight Migrate
 /// stays standalone).
 struct DatabaseURL: Equatable {

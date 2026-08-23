@@ -1,7 +1,7 @@
 import Foundation
 import PackagePlugin
 
-/// Build tool plugin for migration targets (design §6.1).
+/// Build tool plugin for migration targets.
 ///
 /// Attach to the SwiftPM target that holds migration files:
 ///
@@ -16,7 +16,7 @@ import PackagePlugin
 /// The plugin runs `flight-migrate-gen` over the target's sources and compiles the
 /// generated `_allMigrations()` registry into the target. Discovery is therefore
 /// compile-time and deterministic: malformed or duplicate timestamp prefixes fail the
-/// build instead of surprising a deploy (§7.1).
+/// build instead of surprising a deploy.
 @main
 struct FlightMigratePlugin: BuildToolPlugin {
     func createBuildCommands(context: PluginContext, target: Target) async throws -> [Command] {

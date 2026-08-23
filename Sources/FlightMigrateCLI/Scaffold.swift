@@ -1,7 +1,7 @@
 import FlightMigrateCore
 import Foundation
 
-/// Generates new migration files for `create` (design §7.1). The timestamp is always UTC,
+/// Generates new migration files for `create`. The timestamp is always UTC,
 /// always generated — never hand-typed. Names are validated and used verbatim.
 enum Scaffold {
     struct Created {
@@ -44,7 +44,7 @@ enum Scaffold {
     }
 
     /// The 14-digit `YYYYMMDDHHMMSS` version for a date, in UTC. Not configurable
-    /// (design §7.1): local-time prefixes from a distributed team would sort differently
+    ///: local-time prefixes from a distributed team would sort differently
     /// than they were authored.
     static func utcVersion(of date: Date) -> Int64 {
         var calendar = Calendar(identifier: .gregorian)
@@ -56,7 +56,7 @@ enum Scaffold {
     }
 
     /// Whether any migration file in `directory` already uses `version` — same-name or
-    /// not, a duplicate version would fail the build (§7.1), so creation avoids it.
+    /// not, a duplicate version would fail the build, so creation avoids it.
     private static func versionExists(
         _ version: Int64, in directory: URL, fileManager: FileManager
     ) throws -> Bool {

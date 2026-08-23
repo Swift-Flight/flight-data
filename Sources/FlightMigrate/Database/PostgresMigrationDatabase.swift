@@ -48,9 +48,45 @@ struct PostgresMigrationSession: MigrationSession {
         try await run("ROLLBACK")
     }
 
-    func acquireAdvisoryLock(key: Int64) async throws {
+    func acquireAdvisoryLock(key: Int64, timeout: Duration?) async throws {
         logger.debug("acquiring advisory lock", metadata: ["key": "\(key)"])
-        try await run("SELECT pg_advisory_lock(\(key))")
+
+        guard let timeout else {
+            // Unbounded: let Postgres queue us. Cheaper than polling, and the
+            // right choice for an interactive run someone is watching.
+            try await run("SELECT pg_advisory_lock(\(key))")
+            return
+        }
+
+        // Bounded: poll `pg_try_advisory_lock`, which returns immediately
+        // rather than queueing, so the wait stays ours to abandon. Backoff
+        // climbs to 500ms so a long wait costs a handful of round trips
+        // rather than hundreds.
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        var delay = Duration.milliseconds(25)
+
+        while true {
+            if try await tryAcquireAdvisoryLock(key: key) {
+                return
+            }
+            let remaining = clock.now.duration(to: deadline)
+            guard remaining > .zero else {
+                throw MigrationError.lockTimeout(key: key, waited: timeout)
+            }
+            try await Task.sleep(for: min(delay, remaining))
+            delay = min(delay * 2, .milliseconds(500))
+        }
+    }
+
+    /// One non-blocking attempt. `true` when the lock is now held.
+    private func tryAcquireAdvisoryLock(key: Int64) async throws -> Bool {
+        let rows = try await connection.query(
+            "SELECT pg_try_advisory_lock(\(key))", logger: logger)
+        for try await acquired in rows.decode(Bool.self) {
+            return acquired
+        }
+        return false
     }
 
     func releaseAdvisoryLock(key: Int64) async throws {
@@ -68,7 +104,7 @@ struct PostgresMigrationSession: MigrationSession {
     }
 
     func createMigrationsTable(_ table: String) async throws {
-        // Design §4, verbatim modulo identifier quoting. `version` as primary key makes
+        // `version` as primary key makes
         // double-application structurally impossible even without the advisory lock.
         try await execute(
             """

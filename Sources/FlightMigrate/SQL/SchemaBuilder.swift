@@ -1,11 +1,11 @@
-/// The migration DSL (design §2.2, §2.3): a migration's `up`/`down` describe schema
+/// The migration DSL: a migration's `up`/`down` describe schema
 /// changes by recording SQL statements on this builder; `FlightMigrator` executes them.
 ///
 /// The DSL covers common DDL. Anything it doesn't express — `ALTER TYPE ADD VALUE`,
 /// exclusion constraints, data backfills, any Postgres exotica — is ``raw(_:)``, which is
 /// a first-class part of the API, not a leak. Table and column names are plain strings,
 /// deliberately decoupled from any query-layer entity types, so old migrations stay
-/// frozen in time (design §2.4).
+/// frozen in time.
 public final class SchemaBuilder {
     /// The recorded statements, in order. Each is executed as a single SQL statement.
     public private(set) var statements: [String] = []
@@ -68,18 +68,30 @@ public final class SchemaBuilder {
     /// `CREATE INDEX`.
     ///
     /// - Parameters:
+    ///   - table: The table to index. May be schema-qualified.
     ///   - columns: Column names (quoted). For expression indexes use ``raw(_:)``.
     ///   - name: Index name; defaults to `<table>_<columns>_idx`.
+    ///   - unique: Builds a `UNIQUE` index, rejecting duplicate values.
     ///   - concurrently: `CREATE INDEX CONCURRENTLY` — the production-safe build that
     ///     doesn't take a write lock. **Cannot run inside a transaction**: the migration
-    ///     must set `static let wrapInTransaction = false` (design §3.2).
+    ///     must set `static let wrapInTransaction = false`.
+    ///   - ifNotExists: Defaults to whatever `concurrently` is. A concurrent build that
+    ///     fails leaves an `INVALID` index behind under the same name, and because the
+    ///     migration was not wrapped in a transaction there is nothing to roll it back.
+    ///     Retrying then fails on `relation already exists` instead of making progress,
+    ///     so `IF NOT EXISTS` is the only default that lets a retry work. Pass `false`
+    ///     explicitly if you would rather the retry fail loudly.
+    ///   - method: The index method — `btree`, `gin`, `gist` and so on. Postgres
+    ///     picks `btree` when this is omitted.
+    ///   - predicate: A `WHERE` clause, for a partial index covering only the rows
+    ///     that match. Emitted verbatim.
     public func createIndex(
         on table: String,
         columns: [String],
         name: String? = nil,
         unique: Bool = false,
         concurrently: Bool = false,
-        ifNotExists: Bool = false,
+        ifNotExists: Bool? = nil,
         using method: IndexMethod? = nil,
         where predicate: String? = nil
     ) {
@@ -88,7 +100,7 @@ public final class SchemaBuilder {
         if unique { sql += "UNIQUE " }
         sql += "INDEX "
         if concurrently { sql += "CONCURRENTLY " }
-        if ifNotExists { sql += "IF NOT EXISTS " }
+        if ifNotExists ?? concurrently { sql += "IF NOT EXISTS " }
         sql += SQL.columnIdentifier(indexName)
         sql += " ON \(SQL.identifier(table))"
         if let method { sql += " USING \(method.rawValue)" }

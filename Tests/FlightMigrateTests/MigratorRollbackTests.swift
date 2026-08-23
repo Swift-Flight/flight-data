@@ -37,7 +37,7 @@ struct MigratorRollbackTests {
                 .acquireLock(lockKey),
                 .tableExists,
                 .fetchApplied,
-                // down + bookkeeping delete in one transaction (§3.3)
+                // down + bookkeeping delete in one transaction
                 .begin,
                 .execute("DROP TABLE \"gamma\""),
                 .delete(3),
@@ -146,7 +146,7 @@ struct MigratorRollbackTests {
 
     @Test func rollingBackDriftedMigrationFails() async throws {
         // A drifted migration's `down` no longer matches what was applied — hard error,
-        // same as migrate (§5); repair first if the edit was safe.
+        // same as migrate; repair first if the edit was safe.
         let db = FakeDatabase(
             tableCreated: true, seededRows: [appliedRow(1, "CreateAlpha", checksum: "tampered")])
         let migrator = makeMigrator(

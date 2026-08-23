@@ -22,13 +22,13 @@ public enum MigrationEvent: Sendable {
     case unknownAppliedVersions([UnknownApplied])
 
     /// A `wrapInTransaction = false` migration has multiple statements. Discouraged
-    /// (design §3.2): a partial failure cannot be rolled back.
+    ///: a partial failure cannot be rolled back.
     case unwrappedMigrationHasMultipleStatements(
         version: Int64, name: String, statementCount: Int, direction: MigrationDirection)
 
     /// A migration recorded no statements in the direction being run.
     case emptyMigration(version: Int64, name: String, direction: MigrationDirection)
 
-    /// `repair()` re-baselined a recorded checksum (design §5).
+    /// `repair()` re-baselined a recorded checksum.
     case repairedChecksum(version: Int64, name: String, oldChecksum: String, newChecksum: String)
 }

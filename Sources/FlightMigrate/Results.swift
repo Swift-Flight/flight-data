@@ -26,12 +26,12 @@ public struct RolledBackMigration: Sendable {
     }
 }
 
-/// The result of `status()`: applied + pending, with per-migration checksum state (§7).
+/// The result of `status()`: applied + pending, with per-migration checksum state.
 public struct MigrationStatus: Sendable {
     public enum AppliedState: Sendable, Equatable {
         /// Recorded checksum matches the registered migration.
         case ok
-        /// Source drift (design §5): the run-blocking state `repair()` fixes.
+        /// Source drift: the run-blocking state `repair()` fixes.
         case checksumMismatch(recorded: String, current: String)
         /// Applied in the database, but not registered in this binary.
         case missingLocally
@@ -83,7 +83,7 @@ public struct MigrationStatus: Sendable {
     public var isUpToDate: Bool { pending.isEmpty }
 }
 
-/// The result of `repair()` (design §5, §7).
+/// The result of `repair()`.
 public struct RepairOutcome: Sendable, Equatable {
     public struct Repaired: Sendable, Equatable {
         public let version: Int64

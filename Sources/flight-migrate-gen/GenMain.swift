@@ -1,14 +1,14 @@
 import FlightMigrateCore
 import Foundation
 
-/// Build-time registry generator, invoked by `FlightMigratePlugin` (design §6.1):
+/// Build-time registry generator, invoked by `FlightMigratePlugin`:
 ///
 ///     flight-migrate-gen --target-name <name> --output <path> <input.swift> ...
 ///
 /// Reads every source file of the migrations target, validates the migration set, and
 /// writes the `_allMigrations()` registry. Any problem (malformed or duplicate timestamp,
 /// filename/type mismatch, ...) prints `error:` diagnostics and exits non-zero, failing
-/// the build — which is the whole point (§7.1).
+/// the build — which is the whole point.
 @main
 struct GenMain {
     static func main() {

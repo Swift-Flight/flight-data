@@ -7,7 +7,7 @@ public enum MigrationError: Error, CustomStringConvertible, LocalizedError, Send
     case invalidMigrationSet(reason: String)
 
     /// An already-applied migration's source no longer matches its recorded checksum
-    /// (design §5). Halts the run.
+    ///. Halts the run.
     case checksumMismatch(version: Int64, name: String, recorded: String, current: String)
 
     /// The bookkeeping table records versions this binary doesn't know about, and the
@@ -34,6 +34,12 @@ public enum MigrationError: Error, CustomStringConvertible, LocalizedError, Send
     case cannotRollBackUnknownMigration(version: Int64, name: String)
 
     /// A request that is invalid regardless of database state (e.g. `rollback(steps: 0)`).
+    /// The advisory lock could not be acquired within the configured timeout.
+    ///
+    /// Another migration run holds it, or a session leaked it. Check for a
+    /// wedged deploy before raising the timeout.
+    case lockTimeout(key: Int64, waited: Duration)
+
     case invalidRequest(String)
 
     /// Where within a run a migration failed.
@@ -54,7 +60,7 @@ public enum MigrationError: Error, CustomStringConvertible, LocalizedError, Send
             return "invalid migration set: \(reason)"
 
         case .checksumMismatch(let version, let name, let recorded, let current):
-            // First sentence matches design §5 verbatim; details follow.
+            // Lead with the condition; details follow.
             return """
                 migration \(version)_\(name) has been modified since it was applied (checksum \
                 mismatch). Applied migrations are immutable — create a new migration to make \
@@ -128,6 +134,13 @@ public enum MigrationError: Error, CustomStringConvertible, LocalizedError, Send
                 migration.
                 """
 
+        case .lockTimeout(let key, let waited):
+            return """
+            Timed out after \(waited) waiting for the migration advisory lock \
+            (key \(key)). Another migration run is holding it, or a session leaked it. \
+            Check for a deploy that is stuck mid-migration before raising the timeout; \
+            `SELECT * FROM pg_locks WHERE locktype = 'advisory'` shows who holds it.
+            """
         case .invalidRequest(let reason):
             return reason
         }

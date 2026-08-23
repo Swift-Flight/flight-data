@@ -3,7 +3,7 @@ import Foundation
 /// A Postgres column type as rendered into DDL.
 ///
 /// The provided constructors cover the common types; anything else is `.custom("...")`.
-/// This mirrors the DSL's overall stance (design §2.3, §9): common cases are typed,
+/// This mirrors the DSL's overall stance: common cases are typed,
 /// exotic ones drop to strings — deliberately, not apologetically.
 public struct ColumnType: Sendable, Equatable {
     /// The SQL rendering, e.g. `TIMESTAMPTZ` or `VARCHAR(255)`.

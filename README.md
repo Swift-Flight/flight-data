@@ -235,7 +235,7 @@ is not the same as advisable. Prefer a dedicated deploy step.
 
 ## The guarantees, precisely
 
-**Transactional execution (§ the whole point).** A wrapped migration executes as:
+**Transactional execution.** A wrapped migration executes as:
 
 ```
 BEGIN;

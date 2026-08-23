@@ -54,7 +54,7 @@ struct FailsSecondStatement: Migration {
     }
 }
 
-/// Unwrapped, multi-statement (deliberately, to test the §3.2 warning and failure text).
+/// Unwrapped and multi-statement, deliberately, to exercise the warning and failure text.
 struct UnwrappedConcurrent: Migration {
     static let wrapInTransaction = false
 

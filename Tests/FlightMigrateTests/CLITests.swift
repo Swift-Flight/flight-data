@@ -111,7 +111,7 @@ struct ScaffoldTests {
     }
 
     @Test func utcVersionIsUTC() {
-        // 2026-01-02 03:04:05 UTC — verifies no local-time leakage (§7.1: UTC only).
+        // 2026-01-02 03:04:05 UTC — verifies no local-time leakage.
         let date = Date(timeIntervalSince1970: 1_767_323_045)
         #expect(Scaffold.utcVersion(of: date) == 20260102030405)
     }

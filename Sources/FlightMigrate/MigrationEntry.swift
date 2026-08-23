@@ -1,7 +1,7 @@
 import FlightMigrateCore
 
 /// One registered migration: version, name, build-time source checksum, and the type to
-/// instantiate. Produced by the generated `_allMigrations()` registry (design §6.1); can
+/// instantiate. Produced by the generated `_allMigrations()` registry; can
 /// also be constructed by hand for tests or custom discovery.
 public struct MigrationEntry: Sendable {
     /// The 14-digit UTC timestamp prefix, e.g. `20260714120000`. Version and ordering key.
@@ -10,7 +10,7 @@ public struct MigrationEntry: Sendable {
     /// The migration type name, e.g. `CreateUsers`.
     public let name: String
 
-    /// SHA-256 checksum of the migration's source, captured at build time (design §5).
+    /// SHA-256 checksum of the migration's source, captured at build time.
     /// See `MigrationChecksum` in `FlightMigrateCore` for the exact definition.
     public let checksum: String
 
@@ -40,7 +40,7 @@ public struct MigrationEntry: Sendable {
         "\(version)_\(name)"
     }
 
-    /// Whether this migration's body runs inside a transaction (design §3).
+    /// Whether this migration's body runs inside a transaction.
     public var wrapInTransaction: Bool {
         type.wrapInTransaction
     }

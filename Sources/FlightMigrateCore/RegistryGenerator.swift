@@ -1,8 +1,8 @@
-/// Build-time generation of the `_allMigrations()` registry (design §6.1).
+/// Build-time generation of the `_allMigrations()` registry.
 ///
 /// The generator receives every `.swift` source in the migrations target, classifies each
 /// file, validates the set as a whole, and emits a single Swift file containing an ordered
-/// registry. All the properties §6.1/§7.1 promise are enforced here, which makes them
+/// registry. Every property the generated registry promises is enforced here, which makes them
 /// **build-time** errors:
 ///
 /// - malformed timestamp prefixes,
@@ -102,7 +102,7 @@ public enum RegistryGenerator {
                 """
                 duplicate migration version \(version):
                 \(paths)
-                Each migration must have a unique timestamp prefix (design §7.1). This usually \
+                Each migration must have a unique timestamp prefix. This usually \
                 comes from a hand-edited or merge-conflicted filename; regenerate one of the \
                 timestamps with 'flight-migrate create'.
                 """)

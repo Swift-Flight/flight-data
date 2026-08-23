@@ -1,6 +1,6 @@
 /// A deliberately small Swift source scanner used by the build-time generator to verify
 /// that a migration file declares exactly the `Migration`-conforming type its filename
-/// promises (design §6.1).
+/// promises.
 ///
 /// This is not a Swift parser. It strips comments and string literals, then looks for
 /// type declarations (`struct`/`class`/`actor`/`enum`) whose inheritance clause names

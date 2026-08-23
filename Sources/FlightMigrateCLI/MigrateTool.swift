@@ -1,6 +1,6 @@
 import FlightMigrate
 
-/// The entry point for a project's migrate executable (design §7).
+/// The entry point for a project's migrate executable.
 ///
 /// A consumer's whole `main.swift` is:
 ///
@@ -25,8 +25,8 @@ import FlightMigrate
 /// ```
 ///
 /// The database URL comes from `--database-url`, `$FLIGHT_DATABASE_URL`, or
-/// `$DATABASE_URL` (design §8). Migrations are **not** run automatically at boot; running
-/// this binary is the deliberate, observable deploy step §7 calls for.
+/// `$DATABASE_URL`. Migrations are **not** run automatically at boot; running
+/// this binary is a deliberate, observable deploy step.
 public protocol MigrateTool {
     /// The registered migrations — normally the generated `_allMigrations()`.
     static var migrations: [MigrationEntry] { get }

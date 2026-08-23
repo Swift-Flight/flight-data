@@ -4,7 +4,7 @@ import FlightMigrateCore
 import Foundation
 import Testing
 
-/// End-to-end verification of the build plugin (design §6.1): the `_allMigrations()`
+/// End-to-end verification of the build plugin: the `_allMigrations()`
 /// registry that `FlightMigratePlugin` generated during this test run's build must match
 /// what we compute directly from the migration source files on disk.
 @Suite("Plugin-generated registry")

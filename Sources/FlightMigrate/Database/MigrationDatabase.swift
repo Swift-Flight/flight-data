@@ -1,6 +1,6 @@
 import Foundation
 
-/// A row of the bookkeeping table (design §4).
+/// A row of the bookkeeping table.
 public struct AppliedMigrationRecord: Sendable, Equatable {
     public let version: Int64
     public let name: String
@@ -17,7 +17,7 @@ public struct AppliedMigrationRecord: Sendable, Equatable {
 
 /// The database operations `FlightMigrator` needs, on one session.
 ///
-/// A *session* is a single database connection: the advisory lock (design §6) is
+/// A *session* is a single database connection: the advisory lock is
 /// session-scoped, and `begin`/`commit`/`rollback` bracket work on the same connection —
 /// both are meaningless across a connection pool. The Postgres implementation is
 /// ``PostgresMigrationDatabase``; tests substitute an in-memory fake to assert on the
@@ -31,27 +31,32 @@ public protocol MigrationSession: Sendable {
     func commit() async throws
     func rollback() async throws
 
-    /// Blocks until the session-scoped advisory lock is acquired (design §6).
-    func acquireAdvisoryLock(key: Int64) async throws
+    /// Blocks until the session-scoped advisory lock is acquired.
+    /// Acquires the migration advisory lock, waiting at most `timeout`.
+    ///
+    /// A `nil` timeout waits indefinitely. On expiry, throw
+    /// ``MigrationError/lockTimeout(key:waited:)`` so the caller can tell a
+    /// contended lock from a connection failure.
+    func acquireAdvisoryLock(key: Int64, timeout: Duration?) async throws
     func releaseAdvisoryLock(key: Int64) async throws
 
     /// Whether the bookkeeping table exists.
     func migrationsTableExists(_ table: String) async throws -> Bool
 
-    /// Creates the bookkeeping table (the caller wraps this in a transaction, §4).
+    /// Creates the bookkeeping table. The caller wraps this in a transaction.
     func createMigrationsTable(_ table: String) async throws
 
     /// All bookkeeping rows, ordered by version ascending.
     func fetchApplied(_ table: String) async throws -> [AppliedMigrationRecord]
 
     /// Records a migration as applied. Runs inside the migration's transaction when the
-    /// migration is wrapped (design §3.1).
+    /// migration is wrapped.
     func insertApplied(_ table: String, version: Int64, name: String, checksum: String) async throws
 
-    /// Removes a migration's bookkeeping row (rollback, §3.3).
+    /// Removes a migration's bookkeeping row, for rollback.
     func deleteApplied(_ table: String, version: Int64) async throws
 
-    /// Re-baselines a recorded name/checksum (repair, §5).
+    /// Re-baselines a recorded name and checksum, for repair.
     func updateApplied(_ table: String, version: Int64, name: String, checksum: String) async throws
 }
 
