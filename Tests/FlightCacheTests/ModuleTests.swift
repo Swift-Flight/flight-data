@@ -1,3 +1,4 @@
+import Foundation
 import FlightCore
 import Testing
 
@@ -25,7 +26,7 @@ struct ModuleTests {
     @Test("without an adapter module, the in-memory store is the cache")
     func inMemoryDefault() throws {
         defer { FlightCaches.uninstall() }
-        let application = try assemble(
+        let application = try Flight.assemble(
             configuration: Configuration(values: ["cache.memory.max_entries": "5"]),
             modules: [FlightCacheModule.self])
         let store = try application.container.resolve((any Cache).self)
@@ -37,7 +38,7 @@ struct ModuleTests {
     @Test("a registered adapter store wins over the in-memory default")
     func adapterComposesByPresence() throws {
         defer { FlightCaches.uninstall() }
-        let application = try assemble(
+        let application = try Flight.assemble(
             configuration: Configuration(),
             modules: [FlightCacheModule.self, RecordingAdapterModule.self])
         let store = try application.container.resolve((any Cache).self)
@@ -49,7 +50,7 @@ struct ModuleTests {
     func invalidMaxEntriesFailsBootstrap() {
         defer { FlightCaches.uninstall() }
         #expect(throws: (any Error).self) {
-            _ = try assemble(
+            _ = try Flight.assemble(
                 configuration: Configuration(values: ["cache.memory.max_entries": "0"]),
                 modules: [FlightCacheModule.self])
         }
@@ -74,5 +75,56 @@ struct ModuleTests {
             #expect(value == 7)
         }
         return executions
+    }
+}
+
+/// The codec seam, which the module used to leave unreachable.
+@Suite("CacheCodec is resolvable")
+struct CacheCodecSeamTests {
+
+    /// Encodes to a marker no JSON encoder would produce, so a test can tell
+    /// which codec actually ran.
+    struct MarkerCodec: CacheCodec {
+        func encode(_ value: some Encodable) throws -> Data {
+            Data("marker:".utf8) + (try JSONCacheCodec().encode(value))
+        }
+        func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+            try JSONCacheCodec().decode(type, from: data.dropFirst("marker:".count))
+        }
+    }
+
+    /// Registers a codec the way an application would: its own module.
+    struct MarkerCodecModule: FlightModule {
+        static var dependencies: [any FlightModule.Type] { [FlightCacheModule.self] }
+        func configure(_ container: Container) throws {
+            container.register((any CacheCodec).self, scope: .singleton) { _ in MarkerCodec() }
+        }
+    }
+
+    @Test("an application's registered codec is the one the runtime uses")
+    func registeredCodecIsUsed() async throws {
+        defer { FlightCaches.uninstall() }
+        let application = try Flight.assemble(
+            configuration: Configuration(),
+            modules: [FlightCacheModule.self, MarkerCodecModule.self])
+        let runtime = try application.container.resolve(CacheRuntime.self)
+        _ = try await runtime.cacheable(namespace: "codec", parts: ["1"], ttl: .seconds(60)) { 42 }
+
+        let store = try application.container.resolve((any Cache).self)
+        let stored = await store.get(CacheKey(namespace: "codec", parts: ["1"]))
+        #expect(stored.map { String(decoding: $0, as: UTF8.self) }?.hasPrefix("marker:") == true)
+    }
+
+    @Test("no registered codec still means JSON")
+    func defaultCodecIsJSON() async throws {
+        defer { FlightCaches.uninstall() }
+        let application = try Flight.assemble(
+            configuration: Configuration(), modules: [FlightCacheModule.self])
+        let runtime = try application.container.resolve(CacheRuntime.self)
+        _ = try await runtime.cacheable(namespace: "codec", parts: ["2"], ttl: .seconds(60)) { 42 }
+
+        let store = try application.container.resolve((any Cache).self)
+        let stored = await store.get(CacheKey(namespace: "codec", parts: ["2"]))
+        #expect(stored.map { String(decoding: $0, as: UTF8.self) } == "42")
     }
 }

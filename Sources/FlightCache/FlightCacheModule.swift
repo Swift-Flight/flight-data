@@ -4,7 +4,7 @@ import FlightCore
 /// pattern:
 ///
 /// ```swift
-/// try await bootstrap(configuration: .load(), modules: [
+/// try await Flight.bootstrap(configuration: .load(), modules: [
 ///     FlightCacheModule.self,
 ///     FlightCacheValkeyModule.self,   // optional adapter; omit for in-memory
 /// ])
@@ -57,9 +57,22 @@ public struct FlightCacheModule: FlightModule {
         }
 
         container.register(CacheRuntime.self, scope: .singleton) { container in
+            // The codec is resolved, not defaulted in place. `CacheCodec` is
+            // documented as the seam for choosing a wire format, but nothing
+            // read it — the runtime's default parameter meant an application
+            // could register a codec and never find out it was ignored.
+            let codec: any CacheCodec
+            do {
+                codec = try container.resolve((any CacheCodec).self)
+            } catch let error as ResolutionError {
+                guard case .notRegistered = error else { throw error }
+                codec = JSONCacheCodec()
+            }
+
             let runtime = try CacheRuntime(
                 store: try container.resolve((any Cache).self),
-                configuration: try container.resolve(Configuration.self)
+                configuration: try container.resolve(Configuration.self),
+                codec: codec
             )
             FlightCaches.install(runtime)
             return runtime

@@ -48,6 +48,7 @@ public final class CacheRuntime: Sendable {
         parts: [String],
         ttl: Duration?,
         as type: Value.Type = Value.self,
+        isolation: isolated (any Actor)? = #isolation,
         _ body: () async throws -> Value
     ) async throws -> Value {
         let key = CacheKey(namespace: namespace, parts: parts)
@@ -70,7 +71,7 @@ public final class CacheRuntime: Sendable {
                     }
                     let value = try await body()
                     let encoded = await storeIfCacheable(value, key: key, namespace: namespace, annotationTTL: ttl)
-                    await flights.complete(key, with: .success(encoded))
+                    await flights.complete(key, with: outcome(for: value, encoded: encoded))
                     return value
                 } catch {
                     await flights.complete(
@@ -82,14 +83,24 @@ public final class CacheRuntime: Sendable {
                 counters(for: namespace).coalesced.increment()
                 switch outcome {
                 case .success(let data):
-                    if let data, let value: Value = decodeOrNil(data, for: key) {
+                    if let value: Value = decodeOrNil(data, for: key) {
                         return value
                     }
-                    // The leader had nothing publishable (nil result,
-                    // encode failure, or a cross-method type mismatch on
-                    // decode) — compute independently, without re-joining:
-                    // a second coalescing round on bytes that already
-                    // failed once would loop.
+                    // Bytes this waiter's type cannot decode — a cross-method
+                    // type collision on one key. Compute independently rather
+                    // than re-joining, which would loop on the same bytes.
+                    let value = try await body()
+                    _ = await storeIfCacheable(value, key: key, namespace: namespace, annotationTTL: ttl)
+                    return value
+                case .emptyResult:
+                    // The leader's answer was nil, which is an answer. Nothing
+                    // was stored and nothing will be, but a waiter whose own
+                    // type can hold nil is done.
+                    if let value: Value = emptyValue() { return value }
+                    let value = try await body()
+                    _ = await storeIfCacheable(value, key: key, namespace: namespace, annotationTTL: ttl)
+                    return value
+                case .unpublishable:
                     let value = try await body()
                     _ = await storeIfCacheable(value, key: key, namespace: namespace, annotationTTL: ttl)
                     return value
@@ -117,6 +128,7 @@ public final class CacheRuntime: Sendable {
         parts: [String],
         ttl: Duration?,
         as type: Value.Type = Value.self,
+        isolation: isolated (any Actor)? = #isolation,
         _ body: () async -> Value
     ) async -> Value {
         let key = CacheKey(namespace: namespace, parts: parts)
@@ -133,15 +145,18 @@ public final class CacheRuntime: Sendable {
             }
             let value = await body()
             let encoded = await storeIfCacheable(value, key: key, namespace: namespace, annotationTTL: ttl)
-            await flights.complete(key, with: .success(encoded))
+            await flights.complete(key, with: outcome(for: value, encoded: encoded))
             return value
 
         case .wait(let outcome):
             counters(for: namespace).coalesced.increment()
-            if case .success(let data) = outcome, let data,
-                let value: Value = decodeOrNil(data, for: key)
-            {
-                return value
+            switch outcome {
+            case .success(let data):
+                if let value: Value = decodeOrNil(data, for: key) { return value }
+            case .emptyResult:
+                if let value: Value = emptyValue() { return value }
+            case .unpublishable, .failure, .leaderCancelled:
+                break
             }
             let value = await body()
             _ = await storeIfCacheable(value, key: key, namespace: namespace, annotationTTL: ttl)
@@ -227,6 +242,27 @@ public final class CacheRuntime: Sendable {
         let ttl = ttls.effectiveTTL(namespace: namespace, annotation: annotationTTL)
         await store.set(key, value: encoded, ttl: ttl)
         return encoded
+    }
+
+    /// What a leader publishes to its waiters.
+    ///
+    /// Three cases, not two: bytes they can decode, a `nil` answer they can
+    /// return without recomputing, or nothing usable. Collapsing the middle
+    /// case into the last is what let a `nil`-returning method stampede —
+    /// every concurrent caller ran the body, because "the leader stored
+    /// nothing" and "the leader has no answer" looked identical.
+    private func outcome<Value>(for value: Value, encoded: Data?) -> SingleFlight.Outcome {
+        if let encoded { return .success(encoded) }
+        if case Optional<Any>.none = (value as Any) { return .emptyResult }
+        return .unpublishable
+    }
+
+    /// `nil` typed as `Value`, when `Value` is itself an Optional — and `nil`
+    /// (meaning "cannot") when it is not. Lets a waiter turn a leader's
+    /// `emptyResult` into an answer without knowing `Value` statically at the
+    /// flight layer, and without a non-Optional `Value` ever pretending it can.
+    private func emptyValue<Value>(_ type: Value.Type = Value.self) -> Value? {
+        (Optional<Any>.none as Any) as? Value
     }
 
     // MARK: - Metrics (§7)

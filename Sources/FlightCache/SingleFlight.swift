@@ -16,10 +16,21 @@ import Foundation
 public actor SingleFlight {
     /// What the leader hands its waiters.
     public enum Outcome: Sendable {
-        /// The computation finished. `nil` bytes mean the leader had nothing
-        /// publishable (a `nil` result (§5) or an encode failure) — waiters
-        /// fall through to computing for themselves.
-        case success(Data?)
+        /// The computation finished and produced bytes every waiter can decode.
+        case success(Data)
+        /// The computation finished and returned `nil`.
+        ///
+        /// Distinct from ``unpublishable``, and the distinction is the whole
+        /// point: a `nil` result is a real answer the leader computed, so
+        /// waiters can return it rather than each recomputing. Nothing is
+        /// stored — coalescing concurrent callers and caching for later
+        /// callers are separate decisions, and this is only the first.
+        case emptyResult
+        /// The computation finished but its value could not be published —
+        /// an encode failure, or bytes a waiter's type cannot decode. Waiters
+        /// fall through to computing for themselves, because there is no
+        /// answer to hand them.
+        case unpublishable
         /// The computation threw. Waiters rethrow it — re-running a
         /// computation that just errored N more times is the stampede this
         /// type exists to prevent.
