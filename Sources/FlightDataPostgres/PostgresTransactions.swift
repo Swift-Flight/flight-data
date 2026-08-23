@@ -6,7 +6,7 @@ import NIOCore
 import PostgresNIO
 import Synchronization
 
-/// The Postgres implementation of `FlightTransactionCoordinator` (design §6):
+/// The Postgres implementation of `FlightTransactionCoordinator`:
 /// what `@Transactional`'s generated `begin`/`commit`/`rollback` calls reach
 /// when a unit of work runs under `withPostgresScope` /
 /// `withPostgresTransactions`.
@@ -14,10 +14,10 @@ import Synchronization
 /// - **Operates on the scope's connection.** `begin()` resolves the ambient
 ///   scope's `ScopedConnection` lease — the same connection every repository
 ///   in that scope uses — and issues `BEGIN` on it. Called outside an active
-///   `Scope`, it throws `ResolutionError.noActiveScope` (§6: whether a caller
+///   `Scope`, it throws `ResolutionError.noActiveScope` (whether a caller
 ///   is inside `withScope` is genuinely runtime information, so this is the
 ///   residual throwing case the project rule reserves).
-/// - **Nesting maps to savepoints** (§6): a `begin()` under an already-open
+/// - **Nesting maps to savepoints**: a `begin()` under an already-open
 ///   transaction issues `SAVEPOINT flight_sp_<depth>`; its commit issues
 ///   `RELEASE SAVEPOINT`; its rollback `ROLLBACK TO SAVEPOINT`.
 /// - **Two conformances, one bookkeeping** (Core delta 14): the type is both
@@ -174,7 +174,7 @@ public final class PostgresTransactionCoordinator: FlightTransactionCoordinator,
     private func prepareBegin() throws -> BeginContext {
         guard let scope = Scope.active else {
             throw ResolutionError.noActiveScope(
-                "@Transactional (datasource '\(datasource)') — transactional methods must run inside an active Scope; open one with withPostgresScope or bind an existing one with withPostgresTransactions (design §6)"
+                "@Transactional (datasource '\(datasource)') — transactional methods must run inside an active Scope; open one with withPostgresScope or bind an existing one with withPostgresTransactions"
             )
         }
         let connection = try container.resolve(
@@ -405,7 +405,7 @@ extension Container {
                 // @Transactional methods take the async-native path; sync
                 // ones the blocking bridge.
                 try await FlightTransactions.$asyncCoordinator.withValue(coordinator) {
-                    // Hangar's ambient repo (hangar-design §5.1/§11), bound
+                    // Hangar's ambient repo (hangar-design.1/), bound
                     // to this scope's connection so `Repo.require()` inside
                     // the unit of work participates in its transactions.
                     let repo = try resolve(Repo.self, qualifier: name, in: scope)

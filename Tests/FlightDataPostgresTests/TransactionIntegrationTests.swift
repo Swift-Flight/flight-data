@@ -4,11 +4,11 @@ import FlightDataCore
 import FlightDataPostgres
 import Testing
 
-/// §6 against a real server: `@Transactional`'s expansion driving
+/// against a real server: `@Transactional`'s expansion driving
 /// BEGIN/COMMIT/ROLLBACK — and SAVEPOINTs when nested — on the scope's
 /// connection.
 extension PostgresIntegrationSuite {
-@Suite("@Transactional against Postgres (§6)")
+@Suite("@Transactional against Postgres")
 struct TransactionIntegrationTests {
     private func seedAccounts(_ container: Container, balances: [String: Int]) async throws {
         try await container.withPostgresScope { scope in
@@ -119,7 +119,7 @@ struct TransactionIntegrationTests {
     }
 
     @Test func leakedTransactionIsRolledBackOnRelease() async throws {
-        try await withPostgresContainer(poolSize: 1) { container, source in
+        try await withPostgresContainer(poolSize: 2) { container, source in
             try await cleanTables(source)
             try await seedAccounts(container, balances: ["checking": 100])
 

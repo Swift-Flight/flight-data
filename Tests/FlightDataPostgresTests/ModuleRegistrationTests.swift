@@ -6,8 +6,8 @@ import PostgresNIO
 import Testing
 
 /// Registration and bootstrap behavior that needs no server: the module's
-/// components, the §4 fail-at-freeze posture, and the §6 scope requirement.
-@Suite("PostgresDataModule registration (§5)")
+/// components, the fail-at-freeze posture, and the scope requirement.
+@Suite("PostgresDataModule registration")
 struct ModuleRegistrationTests {
     /// A syntactically valid URL for a server that is never dialed —
     /// construction parses eagerly but connects only when the service runs.
@@ -62,7 +62,7 @@ struct ModuleRegistrationTests {
     }
 
     @Test func malformedURLFailsAtFreeze() {
-        // §4 posture: a bad URL is a bootstrap failure, not a first-query one.
+        // posture: a bad URL is a bootstrap failure, not a first-query one.
         let configuration = Configuration(values: [
             DataSourceConfigKey.url(datasource: "primary"): "postgres://localhost:5432"
         ])
@@ -107,7 +107,7 @@ struct ModuleRegistrationTests {
     }
 }
 
-@Suite("Transaction coordinator without a scope (§6)")
+@Suite("Transaction coordinator without a scope")
 struct TransactionScopeRequirementTests {
     @Test func beginOutsideScopeThrowsNoActiveScope() throws {
         let container = try TestContainer.build(
@@ -118,7 +118,7 @@ struct TransactionScopeRequirementTests {
         let coordinator = try container.resolve(PostgresTransactionCoordinator.self)
         // "A @Transactional method must execute inside an active Scope" —
         // and this is a throw, not a compile error, because the information
-        // genuinely does not exist at compile time (design §6).
+        // genuinely does not exist at compile time.
         do {
             _ = try coordinator.begin()
             Issue.record("begin() outside a scope must throw")

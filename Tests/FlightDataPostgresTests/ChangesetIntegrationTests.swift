@@ -5,7 +5,7 @@ import FlightDataPostgres
 import Testing
 
 /// Changesets against a real server — now through Hangar (hangar-design
-/// §11.2): the scoped `Repo` consumes `Changeset` directly, and the
+///): the scoped `Repo` consumes `Changeset` directly, and the
 /// `@Entity` macro generates the `TableModel` metadata one type needs to
 /// serve both queries and changesets.
 extension PostgresIntegrationSuite {
@@ -75,7 +75,7 @@ struct ChangesetIntegrationTests {
         }
     }
 
-    /// The §11 ambient binding: inside a postgres scope, `Repo.require()`
+    /// The ambient binding: inside a postgres scope, `Repo.require()`
     /// answers with the scope's connection-bound repo.
     @Test func ambientRepoIsBoundInsidePostgresScopes() async throws {
         try await withPostgresContainer { container, source in

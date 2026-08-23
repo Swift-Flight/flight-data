@@ -3,7 +3,7 @@ import FlightDataCore
 import Hangar
 import PostgresNIO
 
-// The Hangar adapter (hangar-design §11): what makes `repo.all(...)` work
+// The Hangar adapter (hangar-design): what makes `repo.all(...)` work
 // inside a Flight application. Deliberately thin — Hangar knows nothing
 // about Flight; this file is the entire coupling.
 //
@@ -13,7 +13,7 @@ import PostgresNIO
 // `@Transactional`'s coordinator — a Hangar query inside a
 // `@Transactional` method runs *inside* that transaction, not beside it on
 // a different pool connection. Transactional coherence is the reason the
-// design's §11 sketch ("register Repo as a singleton") is implemented
+// design's sketch ("register Repo as a singleton") is implemented
 // scoped here; the sketch predates this package's scoped-connection model.
 //
 // One caution follows from sharing the connection: within a single unit of

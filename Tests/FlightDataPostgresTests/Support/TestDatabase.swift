@@ -3,7 +3,7 @@ import FlightCore
 import FlightDataCore
 import FlightDataPostgres
 
-/// Integration tests run against a real Postgres (design §8) — the whole
+/// Integration tests run against a real Postgres — the whole
 /// value of this package is that queries are real SQL; mocking the
 /// connection would test nothing that matters. They are gated on
 /// `FLIGHT_POSTGRES_TEST_DATABASE_URL`:
@@ -26,12 +26,14 @@ enum TestDatabase {
     /// database — what `PostgresDataModule`'s factory reads at freeze().
     static func configuration(
         datasource name: String = PrimaryDataSource.name,
-        poolSize: Int = 4
+        poolSize: Int = 4,
+        resetOnRelease: Bool = true
     ) throws -> Configuration {
         let url = try requireURL()
         return Configuration(values: [
             DataSourceConfigKey.url(datasource: name): url,
             DataSourceConfigKey.poolSize(datasource: name): "\(poolSize)",
+            "datasource.\(name).reset_on_release": "\(resetOnRelease)",
         ])
     }
 

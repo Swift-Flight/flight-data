@@ -39,10 +39,23 @@ struct PostgresDataSourceURLTests {
     }
 
     @Test func rejectsUnknownSSLMode() {
-        #expect(throws: PostgresDataSourceURLError.invalidSSLMode(datasource: "primary", value: "verify-full")) {
+        #expect(throws: PostgresDataSourceURLError.invalidSSLMode(datasource: "primary", value: "allow")) {
             try PostgresDataSourceURL.parse(
-                "postgres://localhost/app?sslmode=verify-full", datasource: "primary")
+                "postgres://localhost/app?sslmode=allow", datasource: "primary")
         }
+    }
+
+    @Test("every libpq sslmode this package supports parses to itself",
+          arguments: PostgresDataSourceURL.SSLMode.allCases)
+    func sslModesRoundTrip(mode: PostgresDataSourceURL.SSLMode) throws {
+        // `verify-ca` and `verify-full` used to be rejected outright, while
+        // `prefer` and `require` quietly performed full verification under
+        // libpq's names — so the two modes that authenticate the server were
+        // unavailable, and the default failed against any self-signed
+        // Postgres, which is most development and staging.
+        let url = try PostgresDataSourceURL.parse(
+            "postgres://localhost/app?sslmode=\(mode.rawValue)", datasource: "primary")
+        #expect(url.sslMode == mode)
     }
 
     @Test func rejectsUnknownParameters() {

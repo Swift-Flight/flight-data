@@ -5,18 +5,18 @@ import PostgresNIO
 import ServiceLifecycle
 import Synchronization
 
-/// The Postgres pool behind the `DataSource` seam (design §5, Flight Data
-/// Core §2/§3): one per configured datasource, registered `.singleton`, its
+/// The Postgres pool behind the `DataSource` seam (design, Flight Data
+/// Core /): one per configured datasource, registered `.singleton`, its
 /// long-running work handed to the `ServiceGroup` via `FlightModule.service`.
 ///
 /// ## Why this pool exists (design delta P1 — see SPIKE-FINDINGS.md)
 ///
-/// The design doc's §5 sketch leases connections from PostgresNIO's
+/// The design doc's sketch leases connections from PostgresNIO's
 /// `PostgresClient`. That cannot satisfy the seam: `PostgresClient` exposes
 /// only scoped async lending (`withConnection`) — its `leaseConnection()` is
 /// private — while `DataSource.checkout()` must be *synchronous* (Flight
 /// Data Core delta D1: scoped component factories are synchronous, and a
-/// transaction coordinator's `begin()` is synchronous by Flight Core §5.2).
+/// transaction coordinator's `begin()` is synchronous by Flight Core).
 /// So this package owns a deliberately small pool of `PostgresConnection`s:
 /// eager dial at service start, Mutex-guarded free list, prompt
 /// checkout-or-throw (never parks), broken-connection replacement in the
@@ -24,7 +24,7 @@ import Synchronization
 /// stays PostgresNIO's.
 ///
 /// `run()` is the module service's body: no request is served before the
-/// pool is live (Flight Core §7 bootstrap ordering), and graceful shutdown
+/// pool is live (Flight Core bootstrap ordering), and graceful shutdown
 /// drains it.
 public final class PostgresDataSource: DataSource, Sendable {
     public typealias Connection = PostgresConnection
@@ -32,7 +32,7 @@ public final class PostgresDataSource: DataSource, Sendable {
     /// The datasource's name — config key segment and registration qualifier.
     public let name: String
     /// Fixed pool size: every connection is dialed at `start()`; checkout
-    /// never grows the pool (Flight Data Core §2: prompt or throw).
+    /// never grows the pool (Flight Data Core: prompt or throw).
     public let poolSize: Int
     /// The parsed `datasource.<name>.url`.
     public let url: PostgresDataSourceURL
@@ -60,15 +60,33 @@ public final class PostgresDataSource: DataSource, Sendable {
         /// is offered for reuse.
         var openTransactions: Set<ObjectIdentifier> = []
         var established = 0
+        /// Connections released but not yet reset — checked out by nobody
+        /// and available to nobody until `DISCARD ALL` lands.
+        var resetsInFlight = 0
         var nextConnectionID = 0
         var totalCheckouts = 0
     }
 
-    public init(settings: DataSourceSettings, logger: Logger? = nil) throws {
+    /// Whether a released connection is reset with `DISCARD ALL` before it
+    /// is offered to the next scope.
+    ///
+    /// On by default, and only worth turning off for a deployment that is
+    /// certain nothing it runs mutates session state — no `SET ROLE`, no
+    /// `SET search_path`, no session GUCs, no prepared statements, no
+    /// temporary tables. The saving is one round trip per scope; the cost of
+    /// being wrong is one request reading another tenant's rows.
+    public let resetOnRelease: Bool
+
+    public init(
+        settings: DataSourceSettings,
+        resetOnRelease: Bool = true,
+        logger: Logger? = nil
+    ) throws {
         self.name = settings.name
         self.poolSize = settings.poolSize
+        self.resetOnRelease = resetOnRelease
         // Parsed here — at freeze()'s eager singleton construction — so a
-        // malformed URL fails bootstrap, not the first query (§4 posture).
+        // malformed URL fails bootstrap, not the first query ( posture).
         self.url = try PostgresDataSourceURL.parse(settings.url, datasource: settings.name)
         self.logger = logger ?? Logger(label: "flight.data.postgres.\(settings.name)")
         self.state = Mutex(PoolState())
@@ -76,7 +94,7 @@ public final class PostgresDataSource: DataSource, Sendable {
             of: Void.self, bufferingPolicy: .bufferingNewest(1))
     }
 
-    // MARK: - Service body (§5)
+    // MARK: - Service body
 
     /// Dials the pool, then maintains it (replacing broken connections) until
     /// task cancellation or graceful shutdown, then drains it. This is the
@@ -133,8 +151,14 @@ public final class PostgresDataSource: DataSource, Sendable {
     /// Closes the pool: further checkouts throw `DataSourceError.closed`,
     /// pooled connections are closed now, in-flight ones as they come back.
     public func shutdown() async {
+        // Close the door first, then wait for connections still being reset.
+        // Their completion handlers decrement `established` and close them;
+        // returning before they run would report a pool that still holds
+        // connections it is in the middle of letting go.
+        state.withLock { $0.phase = .closed }
+        await drainPendingResets()
+
         let toClose = state.withLock { state -> [PostgresConnection] in
-            state.phase = .closed
             let connections = state.available
             state.available = []
             state.established -= connections.count
@@ -145,6 +169,24 @@ public final class PostgresDataSource: DataSource, Sendable {
             try? await connection.close()
         }
         logger.info("postgres pool closed", metadata: ["datasource": "\(name)"])
+    }
+
+    /// Waits for outstanding `DISCARD ALL`s to finish, so shutdown does not
+    /// race the handlers that close their connections.
+    private func drainPendingResets() async {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while state.withLock({ $0.resetsInFlight }) > 0 {
+            guard ContinuousClock.now < deadline else {
+                logger.warning(
+                    "gave up waiting for session resets during shutdown",
+                    metadata: [
+                        "datasource": "\(name)",
+                        "outstanding": "\(state.withLock { $0.resetsInFlight })",
+                    ])
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
     }
 
     private func dial() async throws -> PostgresConnection {
@@ -225,6 +267,7 @@ public final class PostgresDataSource: DataSource, Sendable {
             case closePool     // pool shut down while this was out
             case dropBroken
             case rollbackFirst
+            case resetFirst
         }
 
         let disposition = state.withLock { state -> Disposition in
@@ -246,6 +289,11 @@ public final class PostgresDataSource: DataSource, Sendable {
             if state.openTransactions.remove(id) != nil {
                 return .rollbackFirst
             }
+            if resetOnRelease {
+                // Held back until the reset lands — see `.resetFirst`.
+                state.resetsInFlight += 1
+                return .resetFirst
+            }
             state.available.append(connection)
             return .repool
         }
@@ -253,6 +301,49 @@ public final class PostgresDataSource: DataSource, Sendable {
         switch disposition {
         case .repool:
             break
+
+        case .resetFirst:
+            // A pooled connection is a *session*, and a session remembers.
+            // `SET ROLE`, `SET search_path`, `SET app.tenant_id`, prepared
+            // statements, temporary tables, advisory-lock-adjacent state —
+            // all of it survived being returned to the pool and greeted
+            // whichever request checked the connection out next.
+            //
+            // For the row-level-security pattern this package invites, that
+            // is a cross-tenant read: request A sets a tenant, request B
+            // inherits it and sees rows it must not. `DISCARD ALL` is what
+            // PgBouncer issues between sessions for the same reason.
+            //
+            // The connection is not available until the reset succeeds. A
+            // reset that fails means a session in an unknown state, which is
+            // exactly what must not be handed to anyone.
+            let reset: EventLoopFuture<Void> = connection.query("DISCARD ALL").map { _ in }
+            reset.whenComplete { [self] result in
+                switch result {
+                case .success:
+                    let repooled = state.withLock { state -> Bool in
+                        state.resetsInFlight -= 1
+                        guard state.phase == .running else { return false }
+                        state.available.append(connection)
+                        return true
+                    }
+                    if !repooled {
+                        state.withLock { $0.established -= 1 }
+                        connection.close().whenComplete { _ in }
+                    }
+                case .failure(let error):
+                    logger.warning(
+                        "session reset failed; dropping the connection rather than reusing it",
+                        metadata: ["datasource": "\(name)", "error": "\(error)"]
+                    )
+                    state.withLock {
+                        $0.resetsInFlight -= 1
+                        $0.established -= 1
+                    }
+                    connection.close().whenComplete { _ in }
+                    replacementTrigger.yield()
+                }
+            }
         case .closePool:
             connection.close().whenComplete { _ in }
         case .dropBroken:
@@ -295,8 +386,24 @@ public final class PostgresDataSource: DataSource, Sendable {
     /// `SELECT 1`, surfaced by Actuator through the `DataSourceLiveness`
     /// component that `register(dataSource:)` registers alongside the pool.
     public func ping() async throws {
-        try await withConnection { connection in
-            _ = try await connection.query("SELECT 1", logger: logger)
+        do {
+            try await withConnection { connection in
+                _ = try await connection.query("SELECT 1", logger: logger)
+            }
+        } catch DataSourceError.poolExhausted {
+            // A full pool is not a dead database. This used to propagate,
+            // so a liveness probe failed under exactly the load the service
+            // was handling successfully — and an orchestrator restarted a
+            // pod whose only problem was being busy, which is the worst
+            // possible moment to lose one.
+            //
+            // Every connection being checked out is positive evidence that
+            // connections exist and work. Saturation belongs in a readiness
+            // or capacity signal, not a liveness one.
+            logger.debug(
+                "ping found the pool saturated; reporting alive",
+                metadata: ["datasource": "\(name)", "pool_size": "\(poolSize)"]
+            )
         }
     }
 
@@ -331,7 +438,7 @@ public final class PostgresDataSource: DataSource, Sendable {
 /// `DataSourceError` vocabulary.
 public enum PostgresDataSourceError: Error, Sendable, Equatable, CustomStringConvertible {
     /// Checkout before the pool's service started. Under real bootstrap this
-    /// is unreachable (Flight Core §7: services start before requests are
+    /// is unreachable (Flight Core: services start before requests are
     /// served); reaching it means a test harness resolved a connection
     /// without starting the module's service.
     case notStarted(datasource: String)
@@ -339,7 +446,7 @@ public enum PostgresDataSourceError: Error, Sendable, Equatable, CustomStringCon
     public var description: String {
         switch self {
         case .notStarted(let datasource):
-            return "Datasource '\(datasource)' has not started — its pool dials connections when its service runs (Flight Core §7). In tests, start the service (or call start()) before resolving connections."
+            return "Datasource '\(datasource)' has not started — its pool dials connections when its service runs (Flight Core). In tests, start the service (or call start()) before resolving connections."
         }
     }
 }

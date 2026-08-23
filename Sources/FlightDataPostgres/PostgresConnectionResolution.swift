@@ -2,7 +2,7 @@ import FlightCore
 import FlightDataCore
 import PostgresNIO
 
-/// Makes design §3.3's repository shape work as written:
+/// Makes design repository shape work as written:
 ///
 /// ```swift
 /// @Repository(scope: .scoped)
@@ -13,7 +13,7 @@ import PostgresNIO
 /// ```
 ///
 /// `@Autowired` expands to plain `container.resolve(PostgresConnection.self)`
-/// (Flight Core §5.1), and Core's generic `resolve` refuses scoped components —
+/// (Flight Core), and Core's generic `resolve` refuses scoped components —
 /// scoped resolution needs a scope. These overloads are *more specific* than
 /// the generic one, so in any module that imports FlightDataPostgres they win
 /// overload resolution for exactly the two connection-shaped types this

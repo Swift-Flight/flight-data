@@ -4,12 +4,12 @@ import FlightDataCore
 import FlightDataPostgres
 import Testing
 
-/// The §3/§5 properties that only a live pool can prove: scope-bound
+/// The / properties that only a live pool can prove: scope-bound
 /// checkout, connection identity within a scope, return-to-pool at scope
 /// close, and repositories wired through the real `@Repository`/`@Autowired`
 /// macro path.
 extension PostgresIntegrationSuite {
-@Suite("Scoped connections against Postgres (§5)")
+@Suite("Scoped connections against Postgres")
 struct ScopingIntegrationTests {
     @Test func repositoryFindsInsertedRows() async throws {
         try await withPostgresContainer { container, source in
@@ -31,7 +31,7 @@ struct ScopingIntegrationTests {
     }
 
     @Test func designDocExampleTest() async throws {
-        // §8's example test, verbatim in behavior: unknown email → nil.
+        // example test, verbatim in behavior: unknown email → nil.
         try await withPostgresContainer { container, source in
             try await cleanTables(source)
             try await container.withScope { scope in

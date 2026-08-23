@@ -4,14 +4,14 @@ import FlightMigrate
 import Logging
 import PostgresNIO
 
-/// The §7 wiring — and nothing more. Migrations themselves are Flight
+/// The wiring — and nothing more. Migrations themselves are Flight
 /// Migrate's: plain `Migration` types, each applied in its own transaction,
 /// tracked in `flight_migrations`, run as a deliberate step (`flight
 /// migrate` / a migrate binary), never automatically at boot. This package
 /// only connects that machinery to the datasource URL resolved from Flight
 /// Config.
 ///
-/// The test suite uses the same path to prepare its schema (§8): migrations
+/// The test suite uses the same path to prepare its schema: migrations
 /// are exercised on every test run, with no separate schema-setup mechanism.
 public enum PostgresMigrations {
     /// Runs `body` with a `FlightMigrator` wired to the datasource's URL. A

@@ -7,11 +7,11 @@ import PostgresNIO
 import ServiceLifecycle
 import Testing
 
-/// The §5 service story end to end: the module's service dials the pool,
+/// The service story end to end: the module's service dials the pool,
 /// requests are served only once it is live, broken connections are
 /// replaced while it runs, and cancellation drains it.
 extension PostgresIntegrationSuite {
-@Suite("Pool service lifecycle (§5)")
+@Suite("Pool service lifecycle")
 struct PoolLifecycleIntegrationTests {
     @Test func moduleServiceRunsAndDrainsThePool() async throws {
         try await TestSchema.shared.ensure()

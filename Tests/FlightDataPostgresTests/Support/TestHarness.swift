@@ -12,7 +12,7 @@ import Testing
 enum PostgresIntegrationSuite {}
 
 /// Ensures the test schema exists — once per process, through the same
-/// `flight migrate` path production uses (design §8), so the migrations are
+/// `flight migrate` path production uses, so the migrations are
 /// exercised on every test run.
 actor TestSchema {
     static let shared = TestSchema()
@@ -33,11 +33,13 @@ actor TestSchema {
 /// `ServiceGroup` would — runs `body`, and drains the pool.
 func withPostgresContainer<T>(
     poolSize: Int = 4,
+    resetOnRelease: Bool = true,
     _ body: (Container, PostgresDataSource) async throws -> T
 ) async throws -> T {
     try await TestSchema.shared.ensure()
     let container = try TestContainer.build(
-        configuration: try TestDatabase.configuration(poolSize: poolSize)
+        configuration: try TestDatabase.configuration(
+            poolSize: poolSize, resetOnRelease: resetOnRelease)
     ) {
         TestAppModule()
     }

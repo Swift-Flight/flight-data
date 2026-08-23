@@ -1,7 +1,7 @@
 import Foundation
 import FlightDataPostgres
 
-// MARK: - Entities (design §3.2, now Hangar @Entity — hangar-design §11)
+// MARK: - Entities (design, now Hangar @Entity — hangar-design)
 //
 // Column names are camelCase via @Column overrides because the migrated
 // fdp_* schema predates Hangar's snake_case default (it matched
@@ -39,7 +39,7 @@ struct Transfer: Equatable, Sendable {
     var amount: Int
 }
 
-// MARK: - Repositories (design §3.3, queries through the scoped Repo)
+// MARK: - Repositories (design, queries through the scoped Repo)
 
 @Repository(scope: .scoped)
 struct UserRepository {
@@ -69,7 +69,7 @@ enum LedgerError: Error, Equatable {
     case insufficientFunds(account: String)
 }
 
-/// The design doc's §6 transaction example, executable: `@Transactional`
+/// The design doc's transaction example, executable: `@Transactional`
 /// expands to BEGIN/COMMIT/ROLLBACK (savepoints when nested) against the
 /// scope's connection — and the scoped `Repo` shares that connection, so
 /// every Hangar query below runs inside the method's transaction.
@@ -102,7 +102,7 @@ struct LedgerRepository {
             Transfer(id: UUID().uuidString, origin: origin, destination: destination, amount: amount))
     }
 
-    /// Nested transactions (§6): each inner `transfer` runs under a
+    /// Nested transactions: each inner `transfer` runs under a
     /// savepoint; a failed one rolls back to its savepoint without
     /// disturbing transfers already made in this batch.
     @Transactional
@@ -121,7 +121,7 @@ struct LedgerRepository {
         return applied
     }
 
-    /// Transfers, then fails — §6's rollback demonstration.
+    /// Transfers, then fails — rollback demonstration.
     @Transactional
     func transferThenFail(_ amount: Int, from origin: String, to destination: String) async throws {
         try await transfer(amount, from: origin, to: destination)

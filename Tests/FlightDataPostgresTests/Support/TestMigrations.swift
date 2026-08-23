@@ -1,7 +1,7 @@
 import FlightMigrate
 
 // The integration suite's schema, defined and applied through Flight Migrate
-// (design §8): "no separate schema-setup mechanism, so the migrations
+//: "no separate schema-setup mechanism, so the migrations
 // themselves are exercised on every test run." Tables carry an fdp_ prefix
 // to stay clear of other suites sharing the database.
 

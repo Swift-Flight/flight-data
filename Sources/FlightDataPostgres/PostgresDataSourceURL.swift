@@ -2,7 +2,7 @@ import Foundation
 import NIOSSL
 import PostgresNIO
 
-/// The parsed form of `datasource.<name>.url` (Flight Data Core §4). Flight
+/// The parsed form of `datasource.<name>.url` (Flight Data Core). Flight
 /// Data Core has no opinion about URL format; this package's is:
 ///
 ///     postgres://user:password@host:5432/database?sslmode=prefer
@@ -18,10 +18,36 @@ import PostgresNIO
 /// Parsing is eager and loud: a malformed URL throws during `freeze()`'s
 /// singleton construction, failing bootstrap before any request is served.
 public struct PostgresDataSourceURL: Sendable, Equatable {
-    public enum SSLMode: String, Sendable, Equatable {
+    /// `sslmode`, with libpq's meanings.
+    ///
+    /// These used to be libpq's *names* over different behaviour: `prefer`
+    /// and `require` both performed full certificate and hostname
+    /// verification. That is stricter than libpq, which is not automatically
+    /// better when the name is a promise — `prefer` is the default, so the
+    /// out-of-the-box configuration failed against any server with a
+    /// self-signed certificate, which is most development and staging
+    /// Postgres. Anyone who read the URL and expected libpq got something
+    /// else.
+    ///
+    /// The names mean what they mean everywhere else now, and the two modes
+    /// that actually authenticate the server have their real names.
+    public enum SSLMode: String, Sendable, Equatable, CaseIterable {
+        /// No TLS.
         case disable
+        /// TLS if the server offers it, plaintext otherwise. **The server is
+        /// not authenticated** — an interceptor can present any certificate.
         case prefer
+        /// TLS required. **The server is still not authenticated**, which is
+        /// libpq's own long-standing footgun: `require` protects against a
+        /// passive listener, not an active one. Use `verify-full` to
+        /// authenticate.
         case require
+        /// TLS required, and the certificate must chain to a trusted root.
+        case verifyCA = "verify-ca"
+        /// TLS required, the certificate must chain to a trusted root, and
+        /// its name must match the host. The only mode that authenticates the
+        /// server; the right choice for anything crossing a network.
+        case verifyFull = "verify-full"
     }
 
     public let host: String
@@ -101,7 +127,7 @@ public struct PostgresDataSourceURL: Sendable, Equatable {
         )
     }
 
-    /// The pooled-client configuration used by the migrate wiring (§7).
+    /// The pooled-client configuration used by the migrate wiring.
     public func clientConfiguration() throws -> PostgresClient.Configuration {
         var configuration = PostgresClient.Configuration(
             host: host,
@@ -115,26 +141,49 @@ public struct PostgresDataSourceURL: Sendable, Equatable {
         return configuration
     }
 
+    /// The TLS settings each mode implies.
+    ///
+    /// `prefer` and `require` disable verification, matching libpq. The
+    /// `verify-*` modes are the ones that check anything.
+    private func tlsConfiguration() -> TLSConfiguration {
+        var configuration = TLSConfiguration.makeClientConfiguration()
+        switch sslMode {
+        case .disable, .prefer, .require:
+            configuration.certificateVerification = .none
+        case .verifyCA:
+            configuration.certificateVerification = .noHostnameVerification
+        case .verifyFull:
+            configuration.certificateVerification = .fullVerification
+        }
+        return configuration
+    }
+
     private func connectionTLS() throws -> PostgresConnection.Configuration.TLS {
         switch sslMode {
-        case .disable: return .disable
-        case .prefer: return .prefer(try NIOSSLContext(configuration: .makeClientConfiguration()))
-        case .require: return .require(try NIOSSLContext(configuration: .makeClientConfiguration()))
+        case .disable:
+            return .disable
+        case .prefer:
+            return .prefer(try NIOSSLContext(configuration: tlsConfiguration()))
+        case .require, .verifyCA, .verifyFull:
+            return .require(try NIOSSLContext(configuration: tlsConfiguration()))
         }
     }
 
     private func clientTLS() throws -> PostgresClient.Configuration.TLS {
         switch sslMode {
-        case .disable: return .disable
-        case .prefer: return .prefer(.makeClientConfiguration())
-        case .require: return .require(.makeClientConfiguration())
+        case .disable:
+            return .disable
+        case .prefer:
+            return .prefer(tlsConfiguration())
+        case .require, .verifyCA, .verifyFull:
+            return .require(tlsConfiguration())
         }
     }
 }
 
 /// A `datasource.<name>.url` that resolved from configuration but cannot
 /// describe a Postgres connection — the store-specific counterpart of
-/// `DataSourceConfigurationError` (Flight Data Core §4): loud at bootstrap,
+/// `DataSourceConfigurationError` (Flight Data Core): loud at bootstrap,
 /// never at first query.
 public enum PostgresDataSourceURLError: Error, Sendable, Equatable, CustomStringConvertible {
     case unparseable(datasource: String)

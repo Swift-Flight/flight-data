@@ -5,12 +5,12 @@ import FlightMigrate
 import PostgresNIO
 import Testing
 
-/// §7 wiring: the migrator runs against the URL resolved from Flight Config,
+/// wiring: the migrator runs against the URL resolved from Flight Config,
 /// through the same path production deploys use — and the test schema itself
 /// was created by it (see `TestSchema`), so this suite mostly asserts the
 /// bookkeeping is real.
 extension PostgresIntegrationSuite {
-@Suite("Flight Migrate wiring (§7)")
+@Suite("Flight Migrate wiring")
 struct MigrationIntegrationTests {
     @Test func migrateIsIdempotentAndTracked() async throws {
         try await TestSchema.shared.ensure()
