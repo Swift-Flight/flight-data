@@ -1,5 +1,5 @@
 // Integration tests against a real Valkey/Redis — gated per server and run
-// against every server configured, the same §3.1-compatibility duality as
+// against every server configured, the same.1-compatibility duality as
 // flight-data-valkey's suite:
 //
 //   $ docker run -d --name flight-cache-valkey -p 127.0.0.1:56379:6379 valkey/valkey:8-alpine
@@ -59,7 +59,7 @@ struct ValkeyCacheIntegrationTests {
             await cache.set(key, value: Data("42".utf8), ttl: nil)
             #expect(await cache.get(key) == Data("42".utf8))
 
-            // The raw key is the documented shape (§10.2) — inspectable in
+            // The raw key is the documented shape — inspectable in
             // the store.
             let raw = try await cache.client.get("flight-cache:prices:123:eu")
             #expect(raw.map { Data($0) } == Data("42".utf8))

@@ -5,18 +5,18 @@ import Valkey
 
 /// The `cache.valkey.*` config vocabulary — this package's own root, NOT
 /// the `datasource.*` convention: choosing Valkey for caching does not
-/// require adopting it as a data store (design §2.1, Data Valkey §1.1).
+/// require adopting it as a data store (design, Data Valkey).
 public enum ValkeyCacheConfigKey {
     public static let root = "cache.valkey"
     /// `cache.valkey.url` — required. `valkey://` and `redis://` are exact
-    /// synonyms (`valkeys://`/`rediss://` for TLS), same as Data Valkey §3.
+    /// synonyms (`valkeys://`/`rediss://` for TLS), same as Data Valkey
     public static let url = "cache.valkey.url"
-    /// `cache.valkey.command_timeout_ms` — §7's short operation timeout,
+    /// `cache.valkey.command_timeout_ms` — short operation timeout,
     /// bounding a command that is already executing on a leased
     /// connection. Integer milliseconds; optional.
     public static let commandTimeoutMilliseconds = "cache.valkey.command_timeout_ms"
-    /// `cache.valkey.unreachable_after_ms` — the other half of §7's
-    /// timeout story, and the one that actually matters when the server is
+    /// `cache.valkey.unreachable_after_ms` — the other half of the timeout
+    /// story, and the one that actually matters when the server is
     /// down: how long the pool may keep trying to establish a connection
     /// before declaring the server unreachable and failing operations
     /// immediately. Maps to the driver's
@@ -36,7 +36,7 @@ public enum ValkeyCacheConfigKey {
 /// Loaded, validated settings — read at the module factory, which runs at
 /// `freeze()`, so a bad value fails bootstrap, never the first request.
 public struct ValkeyCacheSettings: Sendable, Equatable {
-    /// §7: short by default. Deliberately tighter than a data-store
+    ///: short by default. Deliberately tighter than a data-store
     /// timeout — the fallback here is a computation the caller was prepared
     /// to run anyway.
     public static let defaultCommandTimeout: Duration = .milliseconds(250)
@@ -45,7 +45,7 @@ public struct ValkeyCacheSettings: Sendable, Equatable {
     public static let defaultPoolSize = 20
     /// One connection kept warm, unlike the driver's default of zero. Two
     /// reasons: a cache read on a cold path should not pay a dial, and —
-    /// more importantly for §7 — the pool starts dialing when the service
+    /// more importantly for — the pool starts dialing when the service
     /// starts rather than when the first request arrives, so if the server
     /// is unreachable the pool has usually already given up (delta CV1)
     /// before any request can queue behind it.
@@ -120,14 +120,14 @@ public struct ValkeyCacheSettings: Sendable, Equatable {
     }
 
     /// The driver's client-level configuration: auth, database, TLS, and —
-    /// the point of delta CV1 — both halves of the §7 timeout budget.
+    /// the point of delta CV1 — both halves of the timeout budget.
     ///
     /// `commandTimeout` bounds a command once a connection is leased. It
     /// does **nothing** while the pool is trying to obtain a connection, so
     /// against a downed server it never fires; the pool queues lease
     /// requests until its connection-creation circuit breaker trips, which
     /// at the driver's 60-second default is precisely the hung cache lookup
-    /// §7 forbids. `circuitBreakerTripAfter` is therefore set from
+    /// forbids. `circuitBreakerTripAfter` is therefore set from
     /// `unreachableAfter`: the pool gives up quickly, and every subsequent
     /// call fails in microseconds until the server comes back.
     public func clientConfiguration() throws -> ValkeyClientConfiguration {
@@ -158,7 +158,7 @@ public enum ValkeyCacheConfigurationError: Error, Sendable, Equatable, CustomStr
     public var description: String {
         switch self {
         case .invalidTimeout(let key, let milliseconds):
-            return "\(key) is \(milliseconds) — a §7 timeout must be a positive millisecond count."
+            return "\(key) is \(milliseconds) — a timeout must be a positive millisecond count."
         case .invalidPoolSize(let size):
             return "\(ValkeyCacheConfigKey.poolSize) is \(size) — the cache connection pool needs at least one connection."
         case .invalidMinimumConnections(let minimum, let poolSize):
@@ -168,8 +168,8 @@ public enum ValkeyCacheConfigurationError: Error, Sendable, Equatable, CustomStr
 }
 
 /// The parsed `cache.valkey.url` — the same accepted shapes as Flight Data
-/// Valkey's URL (§3.2 there), re-owned here because this package
-/// deliberately does not depend on that one (§2.1):
+/// Valkey's URL, re-owned here because this package
+/// deliberately does not depend on that one:
 ///
 ///     valkey://localhost:6379
 ///     redis://localhost:6379            // same client, same behavior

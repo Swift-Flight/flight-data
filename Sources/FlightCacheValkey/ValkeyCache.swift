@@ -5,7 +5,7 @@ import Metrics
 import Synchronization
 import Valkey
 
-/// The Valkey/Redis-backed `Cache` (design §10.2) — working against either
+/// The Valkey/Redis-backed `Cache` — working against either
 /// server unchanged. Namespaces map to key prefixes, TTL maps to native
 /// expiry (`SET` with `PX`), so the store handles expiration rather than
 /// Flight polling for it.
@@ -15,7 +15,7 @@ import Valkey
 /// the cache seam is async end to end (none of Data Valkey delta V1's
 /// synchronous-checkout tension applies).
 ///
-/// §7's invariant, upheld here: every operation fails open. Errors are
+/// invariant, upheld here: every operation fails open. Errors are
 /// caught, logged, counted (`flight.cache.store_errors`), and answered with
 /// a miss/no-op.
 ///
@@ -28,7 +28,7 @@ import Valkey
 ///    `circuitBreakerTripAfter`, set here from `unreachable_after_ms`. At
 ///    the driver's 60-second default, the first call against a downed
 ///    server hangs for a *minute* — measured, and precisely the hung lookup
-///    §7 forbids. Configured short, the pool declares the server
+///    forbids. Configured short, the pool declares the server
 ///    unreachable quickly and every later call fails in microseconds until
 ///    it recovers.
 /// 2. **Executing the command.** Bounded by `commandTimeout`, which starts
@@ -40,7 +40,7 @@ import Valkey
 /// self-healing, and already fails in microseconds once open, so this
 /// adapter neither duplicates nor second-guesses it. This adapter's own
 /// `Breaker` owns what the pool cannot see: a server that accepts
-/// connections but whose commands fail or time out, where §7 asks us to
+/// connections but whose commands fail or time out, where asks us to
 /// stop paying the timeout on every request. `classify(_:)` keeps that
 /// division honest — see it for which failures count.
 public final class ValkeyCache: Cache, Sendable {
@@ -48,13 +48,21 @@ public final class ValkeyCache: Cache, Sendable {
     /// recognizable, greppable prefix in a store that may hold non-cache
     /// data too.
     public static let keyPrefix = "flight-cache:"
-    /// §7 breaker: consecutive failures before the store is skipped…
+    /// breaker: consecutive failures before the store is skipped…
     public static let defaultBreakerThreshold = 5
     /// …and for how long.
     public static let defaultBreakerCoolOff: Duration = .seconds(3)
-    /// SCAN batch size for namespace eviction (§10.2).
+    /// SCAN batch size for namespace eviction.
     static let scanBatchSize = 500
 
+    /// The underlying client, for commands this adapter does not wrap.
+    ///
+    /// **Nothing sent through here passes the circuit breaker**, and no
+    /// failure it produces counts toward tripping one. That is the point of
+    /// an escape hatch, but it means a caller leaning on it during an outage
+    /// gets none of the fail-open behaviour the `Cache` methods have — the
+    /// call throws instead of degrading, and the breaker never learns the
+    /// store is unwell.
     public let client: ValkeyClient
     private let logger: Logger
     private let breaker: Breaker
@@ -114,9 +122,9 @@ public final class ValkeyCache: Cache, Sendable {
         }
     }
 
-    /// §10.2: `SCAN MATCH <prefix>* + UNLINK`, honest about being O(keys)
+    ///: `SCAN MATCH <prefix>* + UNLINK`, honest about being O(keys)
     /// and non-atomic — entries written concurrently with the scan may
-    /// survive it. Acceptable for the blunt instrument §9 says this is.
+    /// survive it. Acceptable for the blunt instrument says this is.
     public func evictNamespace(_ namespace: String) async {
         guard breaker.admit() else { return }
         let pattern = Self.globEscaped(Self.keyPrefix + CacheKey.storagePrefix(namespace: namespace)) + "*"
@@ -154,7 +162,7 @@ public final class ValkeyCache: Cache, Sendable {
     enum Failure: Equatable {
         /// Evidence the store is unhealthy in a way the pool cannot see —
         /// chiefly `.timeout`: the server accepted a connection and then
-        /// failed to answer. This is exactly what §7 means by "stop paying
+        /// failed to answer. This is exactly what means by "stop paying
         /// the timeout on every request".
         case storeUnhealthy
         /// A real failure, but no evidence about store health, so it must
@@ -171,6 +179,24 @@ public final class ValkeyCache: Cache, Sendable {
         case notStoreHealth
     }
 
+    /// Whether a failure is evidence the *store* is unwell, or just evidence
+    /// that one command did not work.
+    ///
+    /// This used to answer `.storeUnhealthy` for everything but a short list
+    /// of connectivity codes, which put command errors in the same bucket as
+    /// a dead server. They are not the same thing at all: a server that
+    /// answers `WRONGTYPE` is a healthy server declining one command.
+    ///
+    /// Counting those toward the breaker made a single poisoned key — one
+    /// entry holding a value of the wrong type, one value large enough to be
+    /// refused — black out **the entire cache, every namespace**. Worse, it
+    /// stayed out: the half-open probe is whatever request arrives next,
+    /// which for a hot key is very often the same poisoned one, so the
+    /// breaker re-tripped on the same key indefinitely. Nothing recovered it
+    /// but a restart, and nothing in the logs pointed at the key.
+    ///
+    /// The breaker exists for a store that is unreachable or failing wholesale.
+    /// A per-command refusal fails that one operation open and nothing else.
     static func classify(_ error: any Error) -> Failure {
         if error is CancellationError { return .notStoreHealth }
         guard let clientError = error as? ValkeyClientError else { return .storeUnhealthy }
@@ -178,6 +204,15 @@ public final class ValkeyCache: Cache, Sendable {
         case .connectionCreationCircuitBreakerTripped, .clientIsShutDown,
             .cancelled, .connectionClosedDueToCancellation:
             return .notStoreHealth
+
+        // The server answered. It said no to this command — wrong type for
+        // the key, a value it will not store, a rejected argument — which
+        // says nothing about whether it can serve the next one.
+        case .commandError, .subscriptionError, .respDecodeError:
+            return .notStoreHealth
+
+        // Everything else — connection closed, timeout, parse failure,
+        // cluster/sentinel trouble — is the store not working.
         default:
             return .storeUnhealthy
         }
@@ -192,7 +227,7 @@ public final class ValkeyCache: Cache, Sendable {
             return
         }
         if breaker.recordFailure() {
-            logger.warning("valkey cache breaker tripped; skipping the store during cool-off (§7)", metadata: [
+            logger.warning("valkey cache breaker tripped; skipping the store during cool-off", metadata: [
                 "operation": "\(operation)", "error": "\(error)",
             ])
         } else {
@@ -218,13 +253,16 @@ public final class ValkeyCache: Cache, Sendable {
         return escaped
     }
 
-    /// The §7 consecutive-failure breaker: after `threshold` failures in a
+    /// The consecutive-failure breaker: after `threshold` failures in a
     /// row, `admit()` answers false until `coolOff` has elapsed. One probe
     /// re-closes it on success (or restarts the cool-off on failure).
     final class Breaker: Sendable {
         private struct State {
             var consecutiveFailures = 0
             var reopenAt: ContinuousClock.Instant?
+            /// A half-open probe is out. Holds the gate shut for everyone
+            /// else until it reports back.
+            var probeInFlight = false
         }
 
         private let threshold: Int
@@ -240,11 +278,18 @@ public final class ValkeyCache: Cache, Sendable {
 
         func admit() -> Bool {
             state.withLock { state in
-                guard let reopenAt = state.reopenAt else { return true }
-                guard reopenAt <= clock.now else { return false }
-                // Half-open: let one probe through; recordFailure re-arms.
-                state.reopenAt = nil
-                state.consecutiveFailures = threshold - 1
+                guard let reopenAt = state.reopenAt else { return true }  // closed
+                guard reopenAt <= clock.now else { return false }         // open, cooling off
+                // Half-open: exactly one probe.
+                //
+                // This used to clear `reopenAt` before returning, so every
+                // caller arriving in the same window found the breaker closed
+                // and went to the store — a hundred concurrent callers meant
+                // a hundred probes against a server that had just been
+                // failing, which is the stampede a breaker exists to prevent.
+                // The flag is what makes "one" true.
+                guard !state.probeInFlight else { return false }
+                state.probeInFlight = true
                 return true
             }
         }
@@ -253,13 +298,24 @@ public final class ValkeyCache: Cache, Sendable {
             state.withLock { state in
                 state.consecutiveFailures = 0
                 state.reopenAt = nil
+                state.probeInFlight = false
             }
         }
 
         /// Returns true when this failure tripped the breaker.
         func recordFailure() -> Bool {
             state.withLock { state in
+                let wasProbe = state.probeInFlight
+                state.probeInFlight = false
                 state.consecutiveFailures += 1
+
+                if wasProbe {
+                    // The half-open probe failed: straight back to cooling
+                    // off, and reported as a trip, because the store going
+                    // from "maybe recovered" to "still down" is worth a line.
+                    state.reopenAt = clock.now.advanced(by: coolOff)
+                    return true
+                }
                 guard state.consecutiveFailures >= threshold, state.reopenAt == nil else {
                     return false
                 }

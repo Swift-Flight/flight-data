@@ -1,11 +1,11 @@
 # Flight Cache Valkey
 
 The Valkey/Redis-backed adapter for [Flight Cache](../flight-cache)
-(design §10.2): namespaces as key prefixes, TTL as native expiry, required
+(design): namespaces as key prefixes, TTL as native expiry, required
 for multi-instance deployments where an in-memory cache would give each
 instance its own inconsistent copy.
 
-Deliberately **not** built on Flight Data Valkey (design §2.1): a cache
+Deliberately **not** built on Flight Data Valkey: a cache
 adapter needs `GET`, `SET`, `UNLINK`, and expiry — not repositories,
 `Scope`-bound checkout, or `DataSource` conformance. Shared *library*
 dependency (valkey-swift), independent *package* dependency. And unlike the
@@ -15,24 +15,24 @@ holds a `ValkeyClient` — the driver's own pool, already a ServiceLifecycle
 
 | Piece | Contents |
 |---|---|
-| `ValkeyCache` | §10.2 + §7: fail-open `Cache` over `ValkeyClient` — every error is a logged, counted miss/no-op; consecutive-failure breaker with half-open probe, fed only by failures that actually indicate store ill-health (CV2) |
-| `ValkeyCacheSettings` / `ValkeyCacheURL` | `cache.valkey.*` config (its own root — caching ≠ adopting Valkey as a data store); both §7 timeout phases (CV1), pool sizing; `valkey://`/`redis://` exact synonyms, TLS variants, auth, database |
-| `FlightCacheValkeyModule` | §11: registers the store under `FlightCacheModule.storeQualifier` (compose-by-presence) and runs the client pool as its service |
+| `ValkeyCache` | +: fail-open `Cache` over `ValkeyClient` — every error is a logged, counted miss/no-op; consecutive-failure breaker with half-open probe, fed only by failures that actually indicate store ill-health (CV2) |
+| `ValkeyCacheSettings` / `ValkeyCacheURL` | `cache.valkey.*` config (its own root — caching ≠ adopting Valkey as a data store); both timeout phases (CV1), pool sizing; `valkey://`/`redis://` exact synonyms, TLS variants, auth, database |
+| `FlightCacheValkeyModule` |: registers the store under `FlightCacheModule.storeQualifier` (compose-by-presence) and runs the client pool as its service |
 
 Keys are stored as `flight-cache:` + `CacheKey.storageKey`
 (`flight-cache:prices:123:eu`) — recognizable and greppable in a store that
 may hold non-cache data. Namespace eviction is `SCAN MATCH <prefix>* +
-UNLINK` in batches: O(keys) and non-atomic, per the design's stated §10.2
+UNLINK` in batches: O(keys) and non-atomic, per the design's stated
 trade-off.
 
 ## Build status
 
 **Builds and passes all tests** — verified 2026-08-22 against Swift 6.2.3 on
 Linux (x86_64): 22 tests green in ~1.4 s, the integration suite running
-against **both a real Valkey 8 and a real Redis 7** (the §3.1-compatibility
+against **both a real Valkey 8 and a real Redis 7** (the.1-compatibility
 duality), covering round-trips under the documented key shape, native TTL
 expiry, multi-batch namespace eviction (750 keys > one SCAN batch),
-prefix-collision safety, both §7 timeout phases reaching the driver, the
+prefix-collision safety, both timeout phases reaching the driver, the
 failure classification that feeds the breaker, and the dead-server path
 (every operation degrades to a miss/no-op in bounded time, and the
 adapter's breaker correctly stays closed because the pool's owns that
@@ -78,7 +78,7 @@ The suites `FLUSHDB` between tests — point them at throwaway servers only.
 
 ## Design deltas
 
-- **CV1 — §7's timeout has two phases, and `commandTimeout` only covers
+- **CV1 — timeout has two phases, and `commandTimeout` only covers
   one.** A cache call spends time obtaining a connection and then executing
   a command. `commandTimeout` starts *after* a connection is leased, so
   against a downed server it never fires. What bounds the first phase is
@@ -121,7 +121,7 @@ The suites `FLUSHDB` between tests — point them at throwaway servers only.
   provably cannot trip while any connection is alive (`idle + leased == 0`
   is required), so pool saturation under load never trips it. This
   adapter's breaker owns what the pool cannot see — a server that accepts
-  connections but whose commands time out, §7's "stop paying the timeout
+  connections but whose commands time out, "stop paying the timeout
   on every request". `ValkeyCache.classify(_:)` enforces the split:
   `.connectionCreationCircuitBreakerTripped` (the pool already has it, and
   shadowing it would delay recovery), `.cancelled` /
@@ -133,3 +133,32 @@ The suites `FLUSHDB` between tests — point them at throwaway servers only.
   cool-off elapses, exactly one probe is admitted; success re-closes the
   breaker, failure re-arms the full cool-off immediately rather than
   letting a burst through at reopen.
+
+## What the breaker is for
+
+The circuit breaker skips the store when the store is unwell — unreachable,
+timing out, failing wholesale. It is deliberately **not** for commands the
+server declines.
+
+That distinction used to be missing, and it was expensive. Every failure
+that was not a known connectivity code counted toward tripping, so a single
+poisoned key — one entry holding a value of the wrong type, one value large
+enough to be refused — blacked out the entire cache, every namespace. And it
+stayed out: the half-open probe is whichever request arrives next, which for
+a hot key is very often the same poisoned one, so the breaker re-tripped on
+it indefinitely. Nothing recovered it but a process restart, and nothing in
+the logs named the key.
+
+A command the server refuses now fails that one operation open and nothing
+else. `WRONGTYPE`, `OOM`, a rejected argument — all evidence about one key,
+none about the store.
+
+Half-open admits **one** probe. It used to clear the cool-off before
+returning, so every caller arriving in that window found the breaker closed
+and went to the store — a hundred concurrent callers meant a hundred probes
+against a server that had just been failing, which is the stampede a breaker
+exists to prevent.
+
+`ValkeyCache.client` is an escape hatch to the underlying client. Nothing
+sent through it passes the breaker, and no failure it produces counts toward
+one.

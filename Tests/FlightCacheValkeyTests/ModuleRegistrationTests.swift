@@ -6,7 +6,7 @@ import Testing
 
 /// Serialized: assembling FlightCacheModule installs into the process-global
 /// FlightCaches seam.
-@Suite("FlightCacheValkeyModule — §11 wiring", .serialized)
+@Suite("FlightCacheValkeyModule — wiring", .serialized)
 struct ModuleRegistrationTests {
 
     @Test("the Valkey store wins the compose-by-presence choice")
@@ -14,7 +14,7 @@ struct ModuleRegistrationTests {
         defer { FlightCaches.uninstall() }
         // Construction parses eagerly but dials only when the service runs
         // (nothing listens on port 5).
-        let application = try assemble(
+        let application = try Flight.assemble(
             configuration: Configuration(values: ["cache.valkey.url": "valkey://localhost:5"]),
             modules: [FlightCacheValkeyModule.self])
         let store = try application.container.resolve((any Cache).self)
@@ -28,7 +28,7 @@ struct ModuleRegistrationTests {
     func badURLFailsBootstrap() {
         defer { FlightCaches.uninstall() }
         #expect(throws: (any Error).self) {
-            _ = try assemble(
+            _ = try Flight.assemble(
                 configuration: Configuration(values: ["cache.valkey.url": "http://nope"]),
                 modules: [FlightCacheValkeyModule.self])
         }
@@ -38,7 +38,7 @@ struct ModuleRegistrationTests {
     func missingURLFailsBootstrap() {
         defer { FlightCaches.uninstall() }
         #expect(throws: (any Error).self) {
-            _ = try assemble(configuration: Configuration(), modules: [FlightCacheValkeyModule.self])
+            _ = try Flight.assemble(configuration: Configuration(), modules: [FlightCacheValkeyModule.self])
         }
     }
 }
