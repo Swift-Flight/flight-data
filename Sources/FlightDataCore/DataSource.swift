@@ -50,7 +50,16 @@ public protocol DataSource: Sendable {
     /// the pool afterward — including on throw.
     ///
     /// A default implementation is provided in terms of `checkout`/`release`.
-    func withConnection<T>(_ body: (Connection) async throws -> T) async throws -> T
+    ///
+    /// `isolation` defaults to the caller's actor, so `body` runs *on* that
+    /// actor rather than being sent to a nonisolated context. Without it,
+    /// every actor-isolated caller — which is to say every repository holding
+    /// state — gets "sending 'self'-isolated value … risks causing data
+    /// races" and cannot call this at all.
+    func withConnection<T>(
+        isolation: isolated (any Actor)?,
+        _ body: (Connection) async throws -> T
+    ) async throws -> T
 
     /// Cheap liveness probe (§5) — a `SELECT 1`-equivalent. Surfaced by
     /// Flight Actuator through the `DataSourceLiveness` component that
@@ -59,7 +68,10 @@ public protocol DataSource: Sendable {
 }
 
 extension DataSource {
-    public func withConnection<T>(_ body: (Connection) async throws -> T) async throws -> T {
+    public func withConnection<T>(
+        isolation: isolated (any Actor)? = #isolation,
+        _ body: (Connection) async throws -> T
+    ) async throws -> T {
         let connection = try checkout()
         do {
             let result = try await body(connection)
@@ -81,6 +93,12 @@ public enum DataSourceError: Error, Sendable, Equatable, CustomStringConvertible
     case poolExhausted(datasource: String, poolSize: Int)
     /// The pool has shut down (its service ended); no further checkouts.
     case closed(datasource: String)
+    /// A checkout arrived before the pool's service reached `run()`.
+    ///
+    /// Distinct from ``closed``: that pool is finished, this one has not
+    /// begun. Usually a component resolving a connection during module
+    /// configuration rather than from a request scope.
+    case notStarted(datasource: String)
 
     public var description: String {
         switch self {
@@ -88,6 +106,8 @@ public enum DataSourceError: Error, Sendable, Equatable, CustomStringConvertible
             return "Datasource '\(datasource)' has no free connections (pool_size: \(poolSize)). Either raise datasource.\(datasource).pool_size or look for a scope/lease that is being held too long."
         case .closed(let datasource):
             return "Datasource '\(datasource)' is closed — its pool service has shut down."
+        case .notStarted(let datasource):
+            return "Datasource '\(datasource)' has not started yet — its pool service has not reached run(). A connection resolved during module configuration, rather than from a request scope, will always see this."
         }
     }
 }

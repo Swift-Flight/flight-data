@@ -11,7 +11,7 @@
 /// ```swift
 /// enum Analytics: DataSourceName { static let name = "analytics" }
 ///
-/// try await bootstrap(
+/// try await Flight.bootstrap(
 ///     configuration: .load(),
 ///     modules: [
 ///         PostgresDataModule<PrimaryDataSource>.self,

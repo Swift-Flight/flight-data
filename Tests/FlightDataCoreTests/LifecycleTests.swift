@@ -12,7 +12,7 @@ struct LifecycleTests {
 
     @Test("assemble wires a store module: components registered, module .running, source stamped")
     func assembleStoreModule() throws {
-        let app = try assemble(
+        let app = try Flight.assemble(
             configuration: Configuration(values: ["datasource.primary.pool_size": "2"]),
             modules: [InMemoryDataModule<PrimaryDataSource>.self]
         )
@@ -36,7 +36,7 @@ struct LifecycleTests {
     @Test("bad datasource config fails at bootstrap, not at first query (§4)")
     func configFailureAtBootstrap() {
         do {
-            _ = try assemble(
+            _ = try Flight.assemble(
                 configuration: Configuration(values: ["datasource.primary.pool_size": "0"]),
                 modules: [InMemoryDataModule<PrimaryDataSource>.self]
             )
@@ -55,7 +55,7 @@ struct LifecycleTests {
 
     @Test("one module type, instantiated per named datasource (§4)")
     func modulePerNamedDataSource() throws {
-        let app = try assemble(
+        let app = try Flight.assemble(
             configuration: Configuration(values: [
                 "datasource.primary.pool_size": "2",
                 "datasource.analytics.pool_size": "3",
@@ -85,7 +85,7 @@ struct LifecycleTests {
 
     @Test("a store module's service runs under bootstrap and can wind the pool down")
     func serviceOwningStoreModule() async throws {
-        let app = try assemble(
+        let app = try Flight.assemble(
             configuration: Configuration(),
             modules: [InMemoryDataModule<PrimaryDataSource>.self, PoolServiceModule.self]
         )
@@ -104,7 +104,7 @@ struct LifecycleTests {
 
     @Test("a store service failure flips its module to .failed with zero instrumentation (§5)")
     func serviceFailureHealth() async throws {
-        let app = try assemble(
+        let app = try Flight.assemble(
             configuration: Configuration(),
             modules: [InMemoryDataModule<PrimaryDataSource>.self, FailingPoolServiceModule.self]
         )
@@ -125,7 +125,7 @@ struct LifecycleTests {
 
     @Test("full bootstrap: a one-shot store service ends the app gracefully")
     func fullBootstrap() async throws {
-        try await bootstrap(
+        try await Flight.bootstrap(
             configuration: Configuration(),
             modules: [InMemoryDataModule<PrimaryDataSource>.self, PoolServiceModule.self]
         )

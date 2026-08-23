@@ -3,13 +3,14 @@
 The store-agnostic parts of persistence for Flight: the `DataSource` seam,
 scope-bound connection checkout, the config/health/lifecycle conventions
 every store package (Flight Data Postgres, and any future Mongo/Redis/
-Timescale package) follows — and `Changeset`, the validation/dirty-tracking
-layer every driver consumes through one neutral result type. Implements the
-flight-data-core design doc
-([`../flight-data-core-design.md`](../flight-data-core-design.md)) and the
-flight-changeset design doc
-([`../flight-changeset-design.md`](../flight-changeset-design.md)) on top of
-Flight Core's `Container`/`FlightModule`/`Scope`.
+Timescale package) follows — and re-exports `Changeset`, the
+validation/dirty-tracking layer, as one neutral result type a driver *may*
+consume. Built on Flight Core's `Container`/`FlightModule`/`Scope`.
+
+Note what "may" is doing there. Flight Data Valkey applies changesets
+directly; Flight Data Postgres does not use them at all, because Hangar sits
+above it and consumes changesets itself. A driver is free to ignore the
+changeset layer entirely.
 
 Deliberately tiny. The design doc's anti-goals are load-bearing and this
 package honors them by *absence*:
@@ -24,11 +25,13 @@ package honors them by *absence*:
 
 ## Build status
 
-**Builds and passes all tests** — verified 2026-07-15 against Swift 6.2.3 on
-Linux (x86_64): `swift build` clean under strict Swift 6 concurrency; 87
-tests green across scoping, pool semantics, config conventions, registration,
-module lifecycle, changeset dirty-tracking/validation, and the driver
-boundary — including both design docs' example tests verbatim.
+**Builds and passes all tests** against Swift 6.2.3 on Linux (x86_64):
+`swift build` clean under strict Swift 6 concurrency; 54 tests green across
+scoping, pool semantics, config conventions, registration, module lifecycle,
+changeset dirty-tracking/validation, the driver boundary, and the
+``DataSourceConformance`` suite run against the reference driver.
+
+Dependencies are Flight Core, swift-changeset, and swift-service-lifecycle.
 
 ## What's here
 
@@ -117,6 +120,44 @@ try await container.withScope { scope in
     #expect(a === b)   // same connection within one scope
 }
 ```
+
+## What a pool size actually means
+
+`checkout()` is synchronous by contract — Flight Core's transaction
+coordinator begins transactions synchronously, so a pool that parked the
+caller would deadlock it. The consequence is worth stating plainly rather
+than discovering under load:
+
+**`pool_size` is a hard concurrency ceiling, not a queue depth.** A checkout
+arriving with nothing free fails immediately with
+`DataSourceError.poolExhausted`; it does not wait for a connection to come
+back. There is no backpressure and no checkout timeout, because there is no
+waiting to time out.
+
+Size the pool for peak concurrent *work*, not average throughput, and keep
+units of work short — every scope holds its connection for its whole
+lifetime, so one slow handler occupies a slot for as long as it runs.
+
+## Testing a driver
+
+``DataSourceConformance`` is the contract as an executable suite. A driver
+runs the whole thing in one test:
+
+```swift
+@Test func conformsToDataSourceContract() async throws {
+    try await DataSourceConformance.verify {
+        try await MyDataSource(settings: .test)
+    } shutdown: { source in
+        await source.shutdown()
+    }
+}
+```
+
+It checks the six properties that were previously re-derived by hand in each
+driver's own tests: checkout yields a usable connection, release returns it,
+`withConnection` releases on throw, `withConnection` is callable from
+actor-isolated code, exhaustion is a typed error rather than a hang, and
+checkout after shutdown is refused.
 
 ## Changesets
 
