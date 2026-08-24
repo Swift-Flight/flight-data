@@ -77,6 +77,20 @@ Swift 6.2+, macOS 15+ or Linux. Strict concurrency throughout.
 `swift test --enable-all-traits` — 375 tests. Postgres and Valkey integration
 suites skip unless pointed at a live instance.
 
+## Running the tests
+
+```bash
+./scripts/test.sh                 # everything, integration tests included
+./scripts/test.sh --filter Foo    # arguments pass through to swift test
+```
+
+It starts throwaway servers, runs the suite, and removes them. The
+integration suites skip without a database, and a skipped suite is not a
+passing one — what this package proves against real infrastructure is most of
+what it is for.
+
+`FLIGHT_KEEP_SERVERS=1` leaves the containers up between runs.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
