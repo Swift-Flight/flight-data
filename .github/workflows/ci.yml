@@ -22,10 +22,26 @@ jobs:
     # only accepts a minor version, and "6.2" was resolving to 6.2.1.
     container: swift:${{ matrix.swift }}
 
+    # The Postgres and Valkey suites skip without these, and a green run that
+    # skipped every integration test proves almost nothing: the drivers are
+    # the whole reason this package exists.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: flight
+          POSTGRES_DB: flight_test
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+      valkey:
+        image: valkey/valkey:8-alpine
+        options: >-
+          --health-cmd "valkey-cli ping" --health-interval 10s
+          --health-timeout 5s --health-retries 5
+
     steps:
-      # Interim: flight-data still reaches flight, hangar and swift-changeset
-      # by relative path, so CI reconstructs the directory layout. All three
-      # checkouts and the token disappear when these become URL dependencies.
       # flight, hangar and swift-changeset are resolved by URL now, and
       # those repositories are private — so git needs the token. The sibling
       # checkouts this replaced existed only for the path dependencies that
