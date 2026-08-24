@@ -76,3 +76,7 @@ Swift 6.2+, macOS 15+ or Linux. Strict concurrency throughout.
 
 `swift test --enable-all-traits` — 375 tests. Postgres and Valkey integration
 suites skip unless pointed at a live instance.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
