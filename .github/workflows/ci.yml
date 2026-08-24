@@ -79,7 +79,7 @@ jobs:
           FLIGHT_POSTGRES_TEST_DATABASE_URL: postgres://postgres:flight@postgres:5432/flight_test
           FLIGHT_MIGRATE_TEST_DATABASE_URL: postgres://postgres:flight@postgres:5432/flight_test
           FLIGHT_VALKEY_TEST_URL: redis://valkey:6379
-        run: swift test --enable-all-traits
+        run: ./CI/run-tests.sh
 
       # The lean configuration is a supported consumption mode, so it is
       # built too: this is what a consumer using only the container gets.
