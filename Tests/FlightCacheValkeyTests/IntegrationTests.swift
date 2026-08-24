@@ -73,10 +73,17 @@ struct ValkeyCacheIntegrationTests {
     func ttlExpiry(_ server: TestServer) async throws {
         try await withCache(server) { cache in
             let key = CacheKey(namespace: "prices", parts: ["ttl"])
-            await cache.set(key, value: Data("v".utf8), ttl: .milliseconds(150))
-            #expect(await cache.get(key) != nil)
-            try await Task.sleep(for: .milliseconds(400))
-            #expect(await cache.get(key) == nil)
+            let ttl = Duration.milliseconds(900)
+            await cache.set(key, value: Data("v".utf8), ttl: ttl)
+
+            // Asserting the expiry was *applied* rather than that the value is
+            // still readable: a "set, then immediately get" check against a
+            // short TTL races the clock, and loses whenever the suite is busy.
+            let remaining = try await cache.client.pttl("flight-cache:prices:ttl")
+            #expect(remaining > 0 && remaining <= 900, "expiry set, and no longer than asked")
+
+            try await Task.sleep(for: ttl + .milliseconds(400))
+            #expect(await cache.get(key) == nil, "and the key is gone once it passes")
         }
     }
 
