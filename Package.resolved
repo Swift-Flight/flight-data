@@ -1,12 +1,12 @@
 {
-  "originHash" : "458f3b9908d7286047aa3c76eea71176c0687281343ffb2ead998aeb51b8751f",
+  "originHash" : "c2d6fc62c03e2af5b89bb5af5c7f8a8b53fbfcad26daaba36802b8b420879217",
   "pins" : [
     {
       "identity" : "flight",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Swift-Flight/flight.git",
       "state" : {
-        "revision" : "022441c0891d1b8c04216fbf94d0c10f31c36fa6",
+        "revision" : "772e751f20afde7ad4b45b51fcbf43c9c6408715",
         "version" : "0.1.0"
       }
     },
