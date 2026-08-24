@@ -1,4 +1,4 @@
-// swift-tools-version: 6.2
+// swift-tools-version: 6.3
 import CompilerPluginSupport
 import Foundation
 import PackageDescription
@@ -43,20 +43,18 @@ let package = Package(
         .library(name: "FlightDataValkey", targets: ["FlightDataValkey"]),
     ],
     traits: [
-        // Every optional trait is a DEFAULT trait, and consumers subtract.
+        // Opt-in: name a driver to get it, and resolve nothing else.
         //
-        // SwiftPM 6.2.3 does not resolve the gated dependencies of a
-        // non-default trait enabled on a *versioned* dependency: the build
-        // fails with "exhausted attempts to resolve the dependencies graph".
-        // Path dependencies work, so the failure only appears once a package
-        // is tagged and consumed for real. Default traits resolve correctly,
-        // hence this shape.
-        //
-        //     traits: []                    cache and protocols only, 8 packages
+        //     traits: []                    cache and protocols only, no driver
         //     traits: ["Postgres"]          + PostgresNIO, Hangar, migrations
-        //     traits: ["Valkey"]            + valkey-swift, NIOSSL
-        //     (unspecified)                 everything
-        .default(enabledTraits: ["Postgres", "Valkey"]),
+        //     traits: ["Postgres", "Valkey"] both
+        //
+        // Requires Swift 6.3 or later. Through 6.2.x, SwiftPM did not resolve
+        // the gated dependencies of a non-default trait enabled on a
+        // *versioned* dependency (swiftlang/swift-package-manager #9286,
+        // fixed by #9269) — path dependencies worked, so it only showed up
+        // once this package was tagged.
+        .default(enabledTraits: []),
         .trait(
             name: "Postgres",
             description: "PostgreSQL data source, migrations, and the migration CLI."

@@ -18,30 +18,24 @@ dependencies no enabled trait reaches — so the drivers sit behind traits.
 
 | Configuration | Products | Resolves |
 | --- | --- | --- |
-| `traits: []` | `FlightCache`, `FlightCacheTesting`, `FlightDataCore`, `FlightDataTesting`, `FlightMigrateCore` | 10 packages, no driver |
+| (none) | `FlightCache`, `FlightCacheTesting`, `FlightDataCore`, `FlightDataTesting`, `FlightMigrateCore` | 10 packages, no driver |
 | `traits: ["Postgres"]` | + `FlightDataPostgres`, `FlightMigrate`, `FlightMigrateCLI` | + PostgresNIO, Hangar, ArgumentParser |
 | `traits: ["Valkey"]` | + `FlightCacheValkey`, `FlightDataValkey` | + valkey-swift, NIOSSL |
-| unspecified | everything | both drivers |
 
-**Both traits are default, and you subtract**, so naming nothing gives you
-everything:
+Both are opt-in — name a driver to get it:
 
 ```swift
-// In-memory cache and the data protocols only — no driver resolved at all.
-.package(url: "https://github.com/Swift-Flight/flight-data.git",
-         from: "0.1.0", traits: [])
+// In-memory cache and the data protocols. No driver resolved at all.
+.package(url: "https://github.com/Swift-Flight/flight-data.git", from: "0.1.1")
 
-// With PostgreSQL, and without Valkey.
+// With PostgreSQL.
 .package(url: "https://github.com/Swift-Flight/flight-data.git",
-         from: "0.1.0", traits: ["Postgres"])
+         from: "0.1.1", traits: ["Postgres"])
 ```
 
-Opt-in would be the better default, and this package tried it first. On
-SwiftPM 6.2.3 a consumer enabling a **non-default** trait on a **versioned**
-dependency does not get that trait's gated dependencies resolved — the build
-fails with *"exhausted attempts to resolve the dependencies graph"*. Path
-dependencies work, so this only appears once a package is tagged. Default
-traits resolve correctly, hence opt-out. Revisit when the toolchain allows.
+**Swift 6.3 or later is required**: through 6.2.x, SwiftPM did not resolve a
+non-default trait's gated dependencies through a versioned dependency
+([#9286](https://github.com/swiftlang/swift-package-manager/issues/9286)).
 
 Taking a gated product without its trait is a compile error naming the trait
 you need.
