@@ -6,8 +6,8 @@
 import SwiftSyntax
 import SwiftSyntaxMacroExpansion
 import SwiftSyntaxMacros
-import SwiftSyntaxMacrosTestSupport
-import XCTest
+import SwiftSyntaxMacrosGenericTestSupport
+import Testing
 
 @testable import FlightCacheMacrosImpl
 
@@ -17,12 +17,14 @@ private let testMacros: [String: MacroSpec] = [
     "CachePut": MacroSpec(type: CachePutMacro.self),
 ]
 
-final class CacheMacroFixtureTests: XCTestCase {
+@Suite("cache macro fixtures")
+struct CacheMacroFixtureTests {
 
     // MARK: Fixture 1 — @Cacheable on an async throws method (the design's
     // example, corrected spellings)
 
-    func testCacheableAsyncThrows() {
+    @Test("cacheable async throws")
+    func cacheableAsyncThrows() {
         assertMacroExpansion(
             """
             final class PricingService {
@@ -53,7 +55,8 @@ final class CacheMacroFixtureTests: XCTestCase {
     // MARK: Fixture 2 — @Cacheable, non-throwing, no annotation TTL,
     // excluded parameter
 
-    func testCacheableNonThrowingExcluding() {
+    @Test("cacheable non throwing excluding")
+    func cacheableNonThrowingExcluding() {
         assertMacroExpansion(
             """
             final class PricingService {
@@ -83,7 +86,8 @@ final class CacheMacroFixtureTests: XCTestCase {
 
     // MARK: Fixture 3 — @CacheEvict, namespace-wide, Void async
 
-    func testCacheEvictAllEntries() {
+    @Test("cache evict all entries")
+    func cacheEvictAllEntries() {
         assertMacroExpansion(
             """
             final class PricingService {
@@ -108,7 +112,8 @@ final class CacheMacroFixtureTests: XCTestCase {
 
     // MARK: Fixture 4 — @CacheEvict keyed on an argument, with a result
 
-    func testCacheEvictKeyed() {
+    @Test("cache evict keyed")
+    func cacheEvictKeyed() {
         assertMacroExpansion(
             """
             final class PricingService {
@@ -136,7 +141,8 @@ final class CacheMacroFixtureTests: XCTestCase {
     // MARK: Fixture 5 — @CachePut with the new value excluded (the
     // corrected overridePrice example)
 
-    func testCachePutExcludingNewValue() {
+    @Test("cache put excluding new value")
+    func cachePutExcludingNewValue() {
         assertMacroExpansion(
             """
             final class PricingService {
@@ -168,7 +174,8 @@ final class CacheMacroFixtureTests: XCTestCase {
 
     // MARK: Diagnostics
 
-    func testCacheableRequiresAsync() {
+    @Test("cacheable requires async")
+    func cacheableRequiresAsync() {
         assertMacroExpansion(
             """
             final class S {
@@ -195,7 +202,8 @@ final class CacheMacroFixtureTests: XCTestCase {
         )
     }
 
-    func testCacheableRequiresResult() {
+    @Test("cacheable requires result")
+    func cacheableRequiresResult() {
         assertMacroExpansion(
             """
             final class S {
@@ -220,7 +228,8 @@ final class CacheMacroFixtureTests: XCTestCase {
         )
     }
 
-    func testUnknownExcludedParameterIsRejected() {
+    @Test("unknown excluded parameter is rejected")
+    func unknownExcludedParameterIsRejected() {
         assertMacroExpansion(
             """
             final class S {
@@ -247,7 +256,8 @@ final class CacheMacroFixtureTests: XCTestCase {
         )
     }
 
-    func testEvictWithoutKeyOrAllEntriesIsRejected() {
+    @Test("evict without key or all entries is rejected")
+    func evictWithoutKeyOrAllEntriesIsRejected() {
         assertMacroExpansion(
             """
             final class S {
@@ -272,7 +282,8 @@ final class CacheMacroFixtureTests: XCTestCase {
         )
     }
 
-    func testNamespaceMustBeStringLiteral() {
+    @Test("namespace must be string literal")
+    func namespaceMustBeStringLiteral() {
         assertMacroExpansion(
             """
             final class S {
@@ -299,7 +310,8 @@ final class CacheMacroFixtureTests: XCTestCase {
         )
     }
 
-    func testTypedThrowsIsRejected() {
+    @Test("typed throws is rejected")
+    func typedThrowsIsRejected() {
         assertMacroExpansion(
             """
             final class S {
