@@ -12,28 +12,36 @@ in whichever adapter nobody rebuilt.
 ## Traits
 
 The drivers are heavy and mutually irrelevant: an application using the
-in-memory cache should never resolve a Postgres driver. SwiftPM does not
-prune a package's dependencies by which product you use, but it does prune
-dependencies no enabled trait reaches — so the drivers are behind traits.
+in-memory cache should never resolve a Postgres driver. SwiftPM does not prune
+a package's dependencies by which product you use, but it does prune
+dependencies no enabled trait reaches — so the drivers sit behind traits.
 
 | Configuration | Products | Resolves |
 | --- | --- | --- |
-| default | `FlightCache`, `FlightCacheTesting`, `FlightDataCore`, `FlightDataTesting`, `FlightMigrateCore` | 8 packages |
-| `Postgres` | + `FlightDataPostgres`, `FlightMigrate`, `FlightMigrateCLI` | + PostgresNIO, Hangar, ArgumentParser |
-| `Valkey` | + `FlightCacheValkey`, `FlightDataValkey` | + valkey-swift, NIOSSL |
+| `traits: []` | `FlightCache`, `FlightCacheTesting`, `FlightDataCore`, `FlightDataTesting`, `FlightMigrateCore` | 10 packages, no driver |
+| `traits: ["Postgres"]` | + `FlightDataPostgres`, `FlightMigrate`, `FlightMigrateCLI` | + PostgresNIO, Hangar, ArgumentParser |
+| `traits: ["Valkey"]` | + `FlightCacheValkey`, `FlightDataValkey` | + valkey-swift, NIOSSL |
+| unspecified | everything | both drivers |
+
+**Both traits are default, and you subtract**, so naming nothing gives you
+everything:
 
 ```swift
-// In-memory cache only — no driver resolved at all.
-.package(url: "https://github.com/Swift-Flight/flight-data.git", from: "0.1.0")
+// In-memory cache and the data protocols only — no driver resolved at all.
+.package(url: "https://github.com/Swift-Flight/flight-data.git",
+         from: "0.1.0", traits: [])
 
-// With PostgreSQL.
+// With PostgreSQL, and without Valkey.
 .package(url: "https://github.com/Swift-Flight/flight-data.git",
          from: "0.1.0", traits: ["Postgres"])
-
-// Both.
-.package(url: "https://github.com/Swift-Flight/flight-data.git",
-         from: "0.1.0", traits: ["Postgres", "Valkey"])
 ```
+
+Opt-in would be the better default, and this package tried it first. On
+SwiftPM 6.2.3 a consumer enabling a **non-default** trait on a **versioned**
+dependency does not get that trait's gated dependencies resolved — the build
+fails with *"exhausted attempts to resolve the dependencies graph"*. Path
+dependencies work, so this only appears once a package is tagged. Default
+traits resolve correctly, hence opt-out. Revisit when the toolchain allows.
 
 Taking a gated product without its trait is a compile error naming the trait
 you need.

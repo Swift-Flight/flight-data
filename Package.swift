@@ -43,9 +43,20 @@ let package = Package(
         .library(name: "FlightDataValkey", targets: ["FlightDataValkey"]),
     ],
     traits: [
-        // Default is empty on purpose: the lean configuration is the one you
-        // get by accident, and a driver arrives only when asked for.
-        .default(enabledTraits: []),
+        // Every optional trait is a DEFAULT trait, and consumers subtract.
+        //
+        // SwiftPM 6.2.3 does not resolve the gated dependencies of a
+        // non-default trait enabled on a *versioned* dependency: the build
+        // fails with "exhausted attempts to resolve the dependencies graph".
+        // Path dependencies work, so the failure only appears once a package
+        // is tagged and consumed for real. Default traits resolve correctly,
+        // hence this shape.
+        //
+        //     traits: []                    cache and protocols only, 8 packages
+        //     traits: ["Postgres"]          + PostgresNIO, Hangar, migrations
+        //     traits: ["Valkey"]            + valkey-swift, NIOSSL
+        //     (unspecified)                 everything
+        .default(enabledTraits: ["Postgres", "Valkey"]),
         .trait(
             name: "Postgres",
             description: "PostgreSQL data source, migrations, and the migration CLI."
