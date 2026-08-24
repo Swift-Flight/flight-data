@@ -53,7 +53,10 @@ you need.
 | `FlightDataValkey` | Valkey data source. |
 | `*Testing` | Conformance suites and fakes — including `DataSourceConformance`, the contract every data source must satisfy. |
 
-Per-product documentation lives in [Docs/](Docs/).
+Per-product documentation lives in [Docs/](Docs/). How to test an application
+built on Flight — including the cache and data-source fakes this package
+ships — is covered in
+[flight's testing guide](https://github.com/Swift-Flight/flight/blob/main/Docs/testing.md).
 
 ## Building this repository
 
