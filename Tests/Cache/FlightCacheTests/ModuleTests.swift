@@ -134,3 +134,52 @@ struct CacheCodecSeamTests {
         #expect(stored.map { String(decoding: $0, as: UTF8.self) } == "42")
     }
 }
+
+/// The configuration cross-check on the in-memory fallback.
+///
+/// This is the bug that produced the check: a real application configured
+/// `cache.valkey.url`, omitted `FlightCacheValkeyModule`, and cached
+/// per-node with nothing to show for it. Every layer worked; the
+/// configuration was read by nobody.
+@Suite("FlightCacheModule — unloaded adapter", .serialized)
+struct UnloadedCacheAdapterTests {
+
+    @Test("cache.valkey.url with no adapter module refuses to boot in-memory")
+    func configuredButNotLoaded() async throws {
+        try await GlobalCacheSeam.exclusive {
+            defer { FlightCaches.uninstall() }
+            let configuration = Configuration(values: ["cache.valkey.url": "valkey://127.0.0.1:6379"])
+
+            let error = #expect(throws: (any Error).self) {
+                try Flight.assemble(configuration: configuration, modules: [FlightCacheModule.self])
+            }
+            let message = String(describing: try #require(error))
+            #expect(message.contains("cache.valkey.url"))
+            #expect(message.contains("FlightCacheValkeyModule"))
+        }
+    }
+
+    @Test("an adapter store present means the configuration has a reader — no cross-check")
+    func configuredAndLoaded() async throws {
+        try await GlobalCacheSeam.exclusive {
+            defer { FlightCaches.uninstall() }
+            // Same configuration; a registered store is what the check is
+            // about, so the fallback branch never runs.
+            let configuration = Configuration(values: ["cache.valkey.url": "valkey://127.0.0.1:6379"])
+            let application = try Flight.assemble(
+                configuration: configuration,
+                modules: [ModuleTests.RecordingAdapterModule.self])
+            #expect(try application.container.resolve((any Cache).self) is RecordingCache)
+        }
+    }
+
+    @Test("no adapter and no configuration is the ordinary in-process cache")
+    func neitherConfiguredNorLoaded() async throws {
+        try await GlobalCacheSeam.exclusive {
+            defer { FlightCaches.uninstall() }
+            let application = try Flight.assemble(
+                configuration: Configuration(), modules: [FlightCacheModule.self])
+            #expect(try application.container.resolve((any Cache).self) is InMemoryCache)
+        }
+    }
+}

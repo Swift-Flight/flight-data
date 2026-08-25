@@ -52,6 +52,16 @@ public struct FlightCacheModule: FlightModule {
                 // Absent adapter = in-memory deployment, the common case.
                 // Any other resolution failure is a real wiring bug.
                 guard case .notRegistered = error else { throw error }
+                // So is configuration naming an adapter nobody loaded: the
+                // fallback would work, per node, and the first symptom would
+                // be two users reading different numbers.
+                try container.resolve(Configuration.self).requireNoUnloadedAdapter(
+                    feature: "the cache",
+                    candidates: [
+                        AdapterCandidate(
+                            configurationKey: ValkeyCacheConfigKeyProbe.url,
+                            module: "FlightCacheValkeyModule")
+                    ])
                 return try container.resolve(InMemoryCache.self)
             }
         }
@@ -78,4 +88,15 @@ public struct FlightCacheModule: FlightModule {
             return runtime
         }
     }
+}
+
+/// The adapter's required key, spelled here so the base module can notice a
+/// configuration block its own build may not contain code for.
+///
+/// FlightCache cannot import FlightCacheValkey — the dependency runs the
+/// other way, which is what makes the adapter optional. A string constant is
+/// the whole coupling, and ``ValkeyCacheConfigKey/url`` is pinned equal to it
+/// by a test in the adapter's own suite, so the two cannot drift.
+enum ValkeyCacheConfigKeyProbe {
+    static let url = "cache.valkey.url"
 }

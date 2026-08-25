@@ -1,6 +1,7 @@
 import FlightCore
 import Testing
 
+@testable import FlightCache
 @testable import FlightCacheValkey
 
 @Suite("cache.valkey.* settings and URL parsing")
@@ -135,5 +136,23 @@ struct URLAndSettingsTests {
     func globEscaping() {
         #expect(ValkeyCache.globEscaped("plain:ns:") == "plain:ns:")
         #expect(ValkeyCache.globEscaped(#"a*b?c[d]e\f"#) == #"a\*b\?c\[d\]e\\f"#)
+    }
+}
+
+/// FlightCache notices `cache.valkey.url` in configuration so it can refuse
+/// to fall back to the in-process store when somebody meant to load this
+/// module. It cannot import this module to learn that key — the dependency
+/// runs the other way, which is what makes the adapter optional — so it
+/// holds a copy of the string.
+///
+/// This is the pin on that copy. Rename the key here and the base module
+/// goes back to silently caching per node, which is the exact bug the check
+/// exists to prevent; this test is what makes the rename fail loudly instead.
+@Suite("The base module's copy of this module's key")
+struct ConfigKeyProbeTests {
+
+    @Test("the probe FlightCache checks is the key this module requires")
+    func probeMatchesRealKey() {
+        #expect(ValkeyCacheConfigKeyProbe.url == ValkeyCacheConfigKey.url)
     }
 }

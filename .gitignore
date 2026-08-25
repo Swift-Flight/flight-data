@@ -8,3 +8,7 @@
 # exact dependency versions that were verified locally. SwiftPM ignores a
 # dependency's resolved file, so this never constrains consumers.
 .vscode/
+
+# `swift package edit --path` puts its symlinks here. Local development
+# against a sibling checkout is not a repository fact.
+/Packages/
