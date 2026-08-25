@@ -145,7 +145,13 @@ let package = Package(
                 "FlightDataCore",
                 "FlightDataPostgres",
                 .product(name: "FlightScheduler", package: "flight"),
-                .product(name: "PostgresNIO", package: "postgres-nio"),
+                // Gated, like every other Postgres-facing target here: an
+                // ungated dependency makes a trait-free consumer resolve
+                // PostgresNIO, which is exactly what the lean-consumer check
+                // exists to catch — and did.
+                .product(
+                    name: "PostgresNIO", package: "postgres-nio",
+                    condition: .when(traits: ["Postgres"])),
                 .product(name: "Logging", package: "swift-log"),
             ],
             path: "Sources/Scheduler/FlightSchedulerPostgres",

@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Swift-Flight/flight.git",
       "state" : {
-        "revision" : "ffc1707ffb192095976ff06d302e80f45db9bb5e",
-        "version" : "0.1.2"
+        "revision" : "41b5213d52d53cc7b52618ea64c597b8fb27ae83",
+        "version" : "0.2.0"
       }
     },
     {
