@@ -95,7 +95,8 @@ let package = Package(
                 .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
                 .product(name: "SwiftDiagnostics", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxBuilder", package: "swift-syntax"),
-            ]
+            ],
+            path: "Sources/Cache/FlightCacheMacrosImpl"
         ),
         .target(
             name: "FlightCache",
@@ -106,11 +107,13 @@ let package = Package(
                 .product(name: "Metrics", package: "swift-metrics"),
                 .product(name: "OrderedCollections", package: "swift-collections"),
             ],
+            path: "Sources/Cache/FlightCache",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "FlightCacheTesting",
             dependencies: ["FlightCache"],
+            path: "Sources/Cache/FlightCacheTesting",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
 
@@ -122,6 +125,7 @@ let package = Package(
                 .product(name: "FlightCore", package: "flight"),
                 .product(name: "Changesets", package: "swift-changeset"),
             ],
+            path: "Sources/Data/FlightDataCore",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
@@ -130,15 +134,17 @@ let package = Package(
                 "FlightDataCore",
                 .product(name: "FlightCore", package: "flight"),
             ],
+            path: "Sources/Data/FlightDataTesting",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
 
         // MARK: Migrations — the core and generator are driver-free
 
-        .target(name: "FlightMigrateCore", swiftSettings: [.swiftLanguageMode(.v6)]),
+        .target(name: "FlightMigrateCore", path: "Sources/Migrate/FlightMigrateCore", swiftSettings: [.swiftLanguageMode(.v6)]),
         .executableTarget(
             name: "flight-migrate-gen",
             dependencies: ["FlightMigrateCore"],
+            path: "Sources/Migrate/flight-migrate-gen",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .plugin(
@@ -156,6 +162,7 @@ let package = Package(
                 .product(name: "PostgresNIO", package: "postgres-nio", condition: .when(traits: ["Postgres"])),
                 .product(name: "Logging", package: "swift-log"),
             ],
+            path: "Sources/Migrate/FlightMigrate",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
@@ -165,17 +172,20 @@ let package = Package(
                 "FlightMigrateCore",
                 .product(name: "ArgumentParser", package: "swift-argument-parser", condition: .when(traits: ["Postgres"])),
             ],
+            path: "Sources/Migrate/FlightMigrateCLI",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "ExampleMigrations",
             dependencies: ["FlightMigrate"],
+            path: "Sources/Migrate/ExampleMigrations",
             swiftSettings: [.swiftLanguageMode(.v6)],
             plugins: ["FlightMigratePlugin"]
         ),
         .executableTarget(
             name: "flight-migrate-example",
             dependencies: ["FlightMigrateCLI", "ExampleMigrations"],
+            path: "Sources/Migrate/flight-migrate-example",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
@@ -188,6 +198,7 @@ let package = Package(
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
             ],
+            path: "Sources/Data/FlightDataPostgres",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
 
@@ -204,6 +215,7 @@ let package = Package(
                 .product(name: "Metrics", package: "swift-metrics"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
             ],
+            path: "Sources/Cache/FlightCacheValkey",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
@@ -215,6 +227,7 @@ let package = Package(
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
             ],
+            path: "Sources/Data/FlightDataValkey",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
 
@@ -225,7 +238,8 @@ let package = Package(
             dependencies: [
                 "FlightCache", "FlightCacheTesting",
                 .product(name: "FlightCore", package: "flight"),
-            ]
+            ],
+            path: "Tests/Cache/FlightCacheTests"
         ),
         .testTarget(
             name: "FlightCacheMacroTests",
@@ -234,7 +248,8 @@ let package = Package(
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxMacroExpansion", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxMacrosGenericTestSupport", package: "swift-syntax"),
-            ]
+            ],
+            path: "Tests/Cache/FlightCacheMacroTests"
         ),
         .testTarget(
             name: "FlightDataCoreTests",
@@ -242,11 +257,13 @@ let package = Package(
                 "FlightDataCore", "FlightDataTesting",
                 .product(name: "FlightCore", package: "flight"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
-            ]
+            ],
+            path: "Tests/Data/FlightDataCoreTests"
         ),
         .testTarget(
             name: "FlightMigrateTests",
-            dependencies: ["FlightMigrate", "FlightMigrateCore", "FlightMigrateCLI", "ExampleMigrations"]
+            dependencies: ["FlightMigrate", "FlightMigrateCore", "FlightMigrateCLI", "ExampleMigrations"],
+            path: "Tests/Migrate/FlightMigrateTests"
         ),
         .testTarget(
             name: "FlightDataPostgresTests",
@@ -255,7 +272,8 @@ let package = Package(
                 .product(name: "FlightCore", package: "flight"),
                 .product(name: "PostgresNIO", package: "postgres-nio", condition: .when(traits: ["Postgres"])),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
-            ]
+            ],
+            path: "Tests/Data/FlightDataPostgresTests"
         ),
         .testTarget(
             name: "FlightCacheValkeyTests",
@@ -263,7 +281,8 @@ let package = Package(
                 "FlightCacheValkey", "FlightCache",
                 .product(name: "FlightCore", package: "flight"),
                 .product(name: "Valkey", package: "valkey-swift", condition: .when(traits: ["Valkey"])),
-            ]
+            ],
+            path: "Tests/Cache/FlightCacheValkeyTests"
         ),
         .testTarget(
             name: "FlightDataValkeyTests",
@@ -272,7 +291,8 @@ let package = Package(
                 .product(name: "FlightCore", package: "flight"),
                 .product(name: "Valkey", package: "valkey-swift", condition: .when(traits: ["Valkey"])),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
-            ]
+            ],
+            path: "Tests/Data/FlightDataValkeyTests"
         ),
     ]
 )

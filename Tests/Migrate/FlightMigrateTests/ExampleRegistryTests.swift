@@ -10,12 +10,20 @@ import Testing
 @Suite("Plugin-generated registry")
 struct ExampleRegistryTests {
     private var sourcesDirectory: URL {
-        // Tests/FlightMigrateTests/ExampleRegistryTests.swift → package root.
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("Sources/ExampleMigrations")
+        // Walk up to the directory holding Package.swift rather than counting
+        // path components: counting silently pointed at the wrong directory
+        // the moment this target moved from Tests/X to Tests/Migrate/X.
+        var root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        while !FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("Package.swift").path)
+        {
+            let parent = root.deletingLastPathComponent()
+            precondition(
+                parent.path != root.path,
+                "no Package.swift above \(#filePath) — cannot locate the migration sources")
+            root = parent
+        }
+        return root.appendingPathComponent("Sources/Migrate/ExampleMigrations")
     }
 
     @Test func registryIsOrderedAndComplete() {
