@@ -151,7 +151,7 @@ jobs:
           for target in FlightDataCore FlightCache FlightDataPostgres \
                         FlightDataValkey FlightCacheValkey FlightDataTesting \
                         FlightMigrate FlightMigrateCore \
-                        FlightSchedulerPostgres; do
+                        FlightSchedulerPostgres FlightPubSubValkey; do
             echo "::group::$target"
             swift package --enable-all-traits \
               --allow-writing-to-directory "./docs/$target" \

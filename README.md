@@ -48,6 +48,7 @@ you need.
 | `FlightDataCore` | `DataSource`, connection and transaction protocols, changeset integration. |
 | `FlightMigrateCore` | Migration discovery and ordering, plus the build tool plugin — no driver required. |
 | `FlightDataPostgres` | PostgreSQL data source over PostgresNIO, with Hangar for queries. |
+| `FlightPubSubValkey` | Carries Flight's PubSub between nodes over Valkey, which makes Channels broadcast, Presence membership, and `ClusteredPubSub` work across servers. Requires the `Valkey` trait. |
 | `FlightSchedulerPostgres` | Makes a Flight scheduled job's `.once` mean once across every server, using a Postgres lease row. Requires the `Postgres` trait. |
 | `FlightMigrate` / `FlightMigrateCLI` | Migration runner and its command line interface. |
 | `FlightCacheValkey` | Distributed cache over Valkey. |

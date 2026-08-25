@@ -42,6 +42,7 @@ let package = Package(
         // Requires the "Valkey" trait.
         .library(name: "FlightCacheValkey", targets: ["FlightCacheValkey"]),
         .library(name: "FlightDataValkey", targets: ["FlightDataValkey"]),
+        .library(name: "FlightPubSubValkey", targets: ["FlightPubSubValkey"]),
     ],
     traits: [
         // Opt-in: name a driver to get it, and resolve nothing else.
@@ -155,6 +156,21 @@ let package = Package(
                 .product(name: "Logging", package: "swift-log"),
             ],
             path: "Sources/Scheduler/FlightSchedulerPostgres",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+
+        .target(
+            name: "FlightPubSubValkey",
+            dependencies: [
+                .product(name: "FlightCore", package: "flight"),
+                .product(name: "FlightPubSub", package: "flight"),
+                .product(
+                    name: "Valkey", package: "valkey-swift",
+                    condition: .when(traits: ["Valkey"])),
+                .product(name: "Logging", package: "swift-log"),
+                .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
+            ],
+            path: "Sources/PubSub/FlightPubSubValkey",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
 
@@ -312,6 +328,18 @@ let package = Package(
                 .product(name: "Valkey", package: "valkey-swift", condition: .when(traits: ["Valkey"])),
             ],
             path: "Tests/Cache/FlightCacheValkeyTests"
+        ),
+        .testTarget(
+            name: "FlightPubSubValkeyTests",
+            dependencies: [
+                "FlightPubSubValkey",
+                .product(name: "FlightPubSub", package: "flight"),
+                .product(
+                    name: "Valkey", package: "valkey-swift",
+                    condition: .when(traits: ["Valkey"])),
+            ],
+            path: "Tests/PubSub/FlightPubSubValkeyTests",
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "FlightDataValkeyTests",
