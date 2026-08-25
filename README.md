@@ -26,11 +26,11 @@ Both are opt-in — name a driver to get it:
 
 ```swift
 // In-memory cache and the data protocols. No driver resolved at all.
-.package(url: "https://github.com/Swift-Flight/flight-data.git", from: "0.2.0")
+.package(url: "https://github.com/Swift-Flight/flight-data.git", from: "0.3.0")
 
 // With PostgreSQL.
 .package(url: "https://github.com/Swift-Flight/flight-data.git",
-         from: "0.2.0", traits: ["Postgres"])
+         from: "0.3.0", traits: ["Postgres"])
 ```
 
 **Swift 6.3 or later is required**: through 6.2.x, SwiftPM did not resolve a

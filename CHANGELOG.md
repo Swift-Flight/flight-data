@@ -4,6 +4,52 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-25
+
+### Added
+
+- **`FlightPubSubValkey` — the first distributed PubSub adapter.**
+  `DistributedPubSubAdapter` had been a seam with nothing behind it, and three
+  documented features rested on it. Registering this module makes all three
+  work across servers, and nothing that publishes or subscribes changes:
+
+  ```swift
+  modules: [FlightPubSubValkeyModule.self, AppModule.self]
+  ```
+
+  ```yaml
+  pubsub:
+    valkey:
+      url: valkey://localhost:6379
+  ```
+
+  - **Channels** — a broadcast reaches sockets on other servers
+  - **Presence** — the membership mode has a transport to gossip over
+  - **`ClusteredPubSub`** — reachable at all, rather than a type with no adapter
+
+  Every node publishes to and subscribes to one channel; a Flight `Message`
+  names its own topic inside the frame, because a channel per topic would mean
+  re-subscribing every time a socket joined a room.
+
+  **At-most-once and fire-and-forget**, which is Valkey's pub/sub and is
+  stated rather than implied. A node disconnected at the moment of a publish
+  does not get that message later. Right for presence diffs, chat fan-out and
+  cache invalidation, where the next update supersedes the last; wrong for
+  anything that must not be lost.
+
+  Tested against real Valkey with two independent nodes — cross-node
+  delivery, byte-exact binary payloads, channel isolation, an undecodable
+  frame not killing the relay, and a local subscriber seeing an echoed
+  message exactly once.
+
+### Fixed
+
+- **Ordered shutdown in the adapter's service.** Cancelling the client pool
+  and the relay together releases a subscription connection that may still be
+  initializing, which trips a fatal assertion inside valkey-swift and takes
+  the process down during a graceful stop. The relay now stops first. Found by
+  a test crashing at teardown; the same race was in the service.
+
 ## [0.2.0] - 2026-08-25
 
 ### Added
