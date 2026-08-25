@@ -26,11 +26,11 @@ Both are opt-in — name a driver to get it:
 
 ```swift
 // In-memory cache and the data protocols. No driver resolved at all.
-.package(url: "https://github.com/Swift-Flight/flight-data.git", from: "0.1.1")
+.package(url: "https://github.com/Swift-Flight/flight-data.git", from: "0.2.0")
 
 // With PostgreSQL.
 .package(url: "https://github.com/Swift-Flight/flight-data.git",
-         from: "0.1.1", traits: ["Postgres"])
+         from: "0.2.0", traits: ["Postgres"])
 ```
 
 **Swift 6.3 or later is required**: through 6.2.x, SwiftPM did not resolve a
@@ -48,6 +48,7 @@ you need.
 | `FlightDataCore` | `DataSource`, connection and transaction protocols, changeset integration. |
 | `FlightMigrateCore` | Migration discovery and ordering, plus the build tool plugin — no driver required. |
 | `FlightDataPostgres` | PostgreSQL data source over PostgresNIO, with Hangar for queries. |
+| `FlightSchedulerPostgres` | Makes a Flight scheduled job's `.once` mean once across every server, using a Postgres lease row. Requires the `Postgres` trait. |
 | `FlightMigrate` / `FlightMigrateCLI` | Migration runner and its command line interface. |
 | `FlightCacheValkey` | Distributed cache over Valkey. |
 | `FlightDataValkey` | Valkey data source. |
