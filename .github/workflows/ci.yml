@@ -148,7 +148,9 @@ jobs:
           # The plugin *moves* its archive to --output-path, so the parent
           # has to exist first.
           mkdir -p ./docs
-          for target in FlightDataCore FlightCache FlightDataPostgres FlightMigrate; do
+          for target in FlightDataCore FlightCache FlightDataPostgres \
+                        FlightDataValkey FlightCacheValkey FlightDataTesting \
+                        FlightMigrate FlightMigrateCore; do
             echo "::group::$target"
             swift package --enable-all-traits \
               --allow-writing-to-directory "./docs/$target" \

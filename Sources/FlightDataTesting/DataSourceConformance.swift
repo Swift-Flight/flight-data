@@ -1,7 +1,7 @@
 import FlightDataCore
 import Testing
 
-/// The behaviour every ``DataSource`` owes its callers, as a suite an
+/// The behaviour every `DataSource` owes its callers, as a suite an
 /// implementation can run against itself.
 ///
 /// These six properties were previously re-derived by hand in each driver's
