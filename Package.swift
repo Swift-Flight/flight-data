@@ -71,9 +71,9 @@ let package = Package(
         // never FlightWeb. Opting out of flight's default "Web" trait keeps
         // Hummingbird, NIO, and the TLS stack out of every consumer that
         // wants a cache or a data source but not an HTTP server.
-        .package(url: "https://github.com/Swift-Flight/flight.git", from: "0.2.0", traits: []),
+        .package(url: "https://github.com/Swift-Flight/flight.git", from: "0.2.2", traits: []),
         .package(url: "https://github.com/Swift-Flight/swift-changeset.git", from: "0.1.0"),
-        .package(url: "https://github.com/Swift-Flight/hangar.git", from: "0.1.0"),
+        .package(url: "https://github.com/Swift-Flight/hangar.git", from: "0.2.1"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.6.0"),
         .package(url: "https://github.com/apple/swift-metrics.git", from: "2.5.0"),
         .package(url: "https://github.com/apple/swift-collections.git", from: "1.1.0"),

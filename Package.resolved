@@ -1,6 +1,24 @@
 {
-  "originHash" : "b718f25dad4bdc3118f5e9208cbcd0fda0886cd61f0c2475b089e63026b43ecb",
+  "originHash" : "ede99ddf256ffb81f00c840aa868f9ff7f6c55f86b1cba3e2c14bfa99ae08a31",
   "pins" : [
+    {
+      "identity" : "flight",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Swift-Flight/flight.git",
+      "state" : {
+        "revision" : "22f14db93cead16c4fb881ea08849d8792b04dde",
+        "version" : "0.2.2"
+      }
+    },
+    {
+      "identity" : "hangar",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Swift-Flight/hangar.git",
+      "state" : {
+        "revision" : "568d1e6c609ffefd9ecd461f571764b00de42fb7",
+        "version" : "0.2.1"
+      }
+    },
     {
       "identity" : "postgres-nio",
       "kind" : "remoteSourceControl",
