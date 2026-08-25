@@ -65,6 +65,14 @@ public final class PostgresDataSource: DataSource, Sendable {
         var resetsInFlight = 0
         var nextConnectionID = 0
         var totalCheckouts = 0
+        /// Callers parked in `checkout(waitingUpTo:)`, waiting for a
+        /// connection to come back. Keyed so a caller that times out can take
+        /// itself out rather than leaving an entry behind forever.
+        var waiters: [UInt64: Waiter] = [:]
+        var nextWaiterID: UInt64 = 0
+        /// The high-water mark of parked callers, for Actuator and for
+        /// answering "is the pool too small" with a number.
+        var peakWaiting = 0
     }
 
     /// Whether a released connection is reset with `DISCARD ALL` before it
@@ -129,6 +137,7 @@ public final class PostgresDataSource: DataSource, Sendable {
                     try? await connection.close()
                     return
                 }
+                wakeOneWaiter()
             }
             logger.info("postgres pool started", metadata: [
                 "datasource": "\(name)", "pool_size": "\(poolSize)",
@@ -219,6 +228,7 @@ public final class PostgresDataSource: DataSource, Sendable {
                     try? await connection.close()
                     return
                 }
+                wakeOneWaiter()
                 logger.info("replaced broken postgres connection", metadata: ["datasource": "\(name)"])
             } catch {
                 // The server is unreachable; the next checkout/release that
@@ -233,6 +243,163 @@ public final class PostgresDataSource: DataSource, Sendable {
     }
 
     // MARK: - DataSource
+
+    /// One parked caller. Reserved before parking so a wake that arrives
+    /// first is remembered rather than lost.
+    fileprivate enum Waiter: Sendable {
+        case reserved
+        case parked(CheckedContinuation<Void, Never>)
+        case woken
+    }
+
+    /// Checks a connection out, waiting up to `timeout` for one to come back.
+    ///
+    /// `checkout()` is synchronous — it has to be, because scoped components
+    /// are built inside synchronous factory bodies — and a synchronous
+    /// checkout cannot wait, so it throws the moment the pool is empty. For a
+    /// server that turns `pool_size` into a hard concurrency ceiling: the
+    /// (pool_size + 1)th simultaneous request does not queue behind the
+    /// others for a few milliseconds, it fails, and the person holding the
+    /// browser sees an error because someone else was mid-request.
+    ///
+    /// This is the same checkout for callers that can await. A pool at
+    /// capacity is a queue, not a wall, until the timeout — at which point
+    /// failing is correct, because a request that has been waiting that long
+    /// for a connection is a request nobody is still watching.
+    ///
+    /// Found by a test that created eight issues at once against a pool of
+    /// four: four succeeded and four returned 500 immediately.
+    public func checkout(waitingUpTo timeout: Duration) async throws -> PostgresConnection {
+        if let connection = try checkoutIfAvailable() { return connection }
+
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while ContinuousClock.now < deadline {
+            await waitForRelease(until: deadline)
+            if let connection = try checkoutIfAvailable() { return connection }
+        }
+        throw DataSourceError.poolExhausted(datasource: name, poolSize: poolSize)
+    }
+
+    /// `checkout()`'s body, with "nothing free" as a value rather than an
+    /// error — the distinction the waiting form needs and the throwing one
+    /// does not.
+    private func checkoutIfAvailable() throws -> PostgresConnection? {
+        var sawBrokenConnection = false
+        defer { if sawBrokenConnection { replacementTrigger.yield() } }
+
+        return try state.withLock { state in
+            switch state.phase {
+            case .closed:
+                throw DataSourceError.closed(datasource: name)
+            case .idle:
+                throw PostgresDataSourceError.notStarted(datasource: name)
+            case .running:
+                break
+            }
+            while let connection = state.available.popLast() {
+                guard !connection.isClosed else {
+                    state.established -= 1
+                    sawBrokenConnection = true
+                    continue
+                }
+                state.checkedOut.insert(ObjectIdentifier(connection))
+                state.totalCheckouts += 1
+                return connection
+            }
+            return nil
+        }
+    }
+
+    /// Parks until a connection is repooled or the deadline passes.
+    ///
+    /// The waiter's slot is reserved under the lock *before* suspending, so a
+    /// release landing in the window between the two does not wake nobody.
+    private func waitForRelease(until deadline: ContinuousClock.Instant) async {
+        let id = state.withLock { state -> UInt64 in
+            state.nextWaiterID += 1
+            let id = state.nextWaiterID
+            state.waiters[id] = .reserved
+            state.peakWaiting = max(state.peakWaiting, state.waiters.count)
+            return id
+        }
+
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await self.park(id) }
+            group.addTask {
+                try? await Task.sleep(until: deadline, clock: .continuous)
+                self.wake(id)
+            }
+            await group.next()
+            group.cancelAll()
+            // Whichever finished first, the other is finished with: waking an
+            // already-woken id is a no-op, and it is what guarantees the park
+            // task cannot outlive this call.
+            self.wake(id)
+        }
+    }
+
+    private func park(_ id: UInt64) async {
+        await withCheckedContinuation { continuation in
+            let alreadyWoken = state.withLock { state -> Bool in
+                switch state.waiters[id] {
+                case .reserved:
+                    state.waiters[id] = .parked(continuation)
+                    return false
+                default:
+                    // Woken between reserving and parking. Take the slot and
+                    // resume immediately rather than sleeping through it.
+                    state.waiters[id] = nil
+                    return true
+                }
+            }
+            if alreadyWoken { continuation.resume() }
+        }
+    }
+
+    /// Wakes one specific waiter. Idempotent.
+    private func wake(_ id: UInt64) {
+        let continuation = state.withLock { state -> CheckedContinuation<Void, Never>? in
+            switch state.waiters[id] {
+            case .parked(let continuation):
+                state.waiters[id] = nil
+                return continuation
+            case .reserved:
+                // Reserved but not yet parked: mark it so `park` sees the
+                // wake instead of suspending forever.
+                state.waiters[id] = .woken
+                return nil
+            case .woken, nil:
+                return nil
+            }
+        }
+        continuation?.resume()
+    }
+
+    /// Wakes the longest-parked caller, if any. Called wherever a connection
+    /// lands back in `available`.
+    private func wakeOneWaiter() {
+        let continuation = state.withLock { state -> CheckedContinuation<Void, Never>? in
+            guard let id = state.waiters.keys.min() else { return nil }
+            switch state.waiters[id] {
+            case .parked(let continuation):
+                state.waiters[id] = nil
+                return continuation
+            case .reserved:
+                state.waiters[id] = .woken
+                return nil
+            case .woken, nil:
+                return nil
+            }
+        }
+        continuation?.resume()
+    }
+
+    /// How many callers are parked waiting for a connection right now, and
+    /// the most there have ever been. A pool that is too small says so here
+    /// before it says so as errors.
+    public var waitingCallers: (now: Int, peak: Int) {
+        state.withLock { ($0.waiters.count, $0.peakWaiting) }
+    }
 
     public func checkout() throws -> PostgresConnection {
         var sawBrokenConnection = false
@@ -300,7 +467,11 @@ public final class PostgresDataSource: DataSource, Sendable {
 
         switch disposition {
         case .repool:
-            break
+            // Back in the pool, so whoever is parked can stop waiting. Every
+            // path that appends to `available` does this — a connection that
+            // comes back with nobody told about it is a caller waiting out
+            // its whole timeout beside a free connection.
+            wakeOneWaiter()
 
         case .resetFirst:
             // A pooled connection is a *session*, and a session remembers.
@@ -327,7 +498,9 @@ public final class PostgresDataSource: DataSource, Sendable {
                         state.available.append(connection)
                         return true
                     }
-                    if !repooled {
+                    if repooled {
+                        wakeOneWaiter()
+                    } else {
                         state.withLock { $0.established -= 1 }
                         connection.close().whenComplete { _ in }
                     }
@@ -367,7 +540,9 @@ public final class PostgresDataSource: DataSource, Sendable {
                         state.available.append(connection)
                         return true
                     }
-                    if !repooled {
+                    if repooled {
+                        wakeOneWaiter()
+                    } else {
                         state.withLock { $0.established -= 1 }
                         connection.close().whenComplete { _ in }
                     }

@@ -2,24 +2,6 @@
   "originHash" : "b718f25dad4bdc3118f5e9208cbcd0fda0886cd61f0c2475b089e63026b43ecb",
   "pins" : [
     {
-      "identity" : "flight",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Swift-Flight/flight.git",
-      "state" : {
-        "revision" : "41b5213d52d53cc7b52618ea64c597b8fb27ae83",
-        "version" : "0.2.0"
-      }
-    },
-    {
-      "identity" : "hangar",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Swift-Flight/hangar.git",
-      "state" : {
-        "revision" : "c8d4dd0fd819ac8e42c2dba5b48755898352e24b",
-        "version" : "0.2.0"
-      }
-    },
-    {
       "identity" : "postgres-nio",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/vapor/postgres-nio.git",
@@ -107,24 +89,6 @@
       "state" : {
         "revision" : "dc4030184203ffafbb2ec614352487235d747fe0",
         "version" : "1.4.1"
-      }
-    },
-    {
-      "identity" : "swift-docc-plugin",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/swiftlang/swift-docc-plugin",
-      "state" : {
-        "revision" : "647c708be89f834fa6a6d4945442793a77ddf5b6",
-        "version" : "1.5.0"
-      }
-    },
-    {
-      "identity" : "swift-docc-symbolkit",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/swiftlang/swift-docc-symbolkit",
-      "state" : {
-        "revision" : "b45d1f2ed151d057b54504d653e0da5552844e34",
-        "version" : "1.0.0"
       }
     },
     {

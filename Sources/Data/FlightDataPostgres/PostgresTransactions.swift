@@ -393,9 +393,53 @@ extension Container {
     ///     try await service.transfer(...)   // @Transactional methods inside
     /// }
     /// ```
+    /// How a unit of work gets its connection.
+    ///
+    /// `.lazy` is the original behaviour and the right default for a scope
+    /// that may never touch the database: nothing is checked out until
+    /// something asks, and if the pool is full at that moment the request
+    /// fails immediately, because a synchronous factory cannot wait.
+    ///
+    /// `.waiting` takes the connection up front, queueing for one if the pool
+    /// is busy, and offers it to the scope. That is what turns `pool_size`
+    /// from a hard concurrency ceiling into a queue: the (pool_size + 1)th
+    /// simultaneous request waits a few milliseconds instead of failing. The
+    /// cost is that the connection is held for the whole unit of work even if
+    /// it goes unused, so it suits request handlers that mostly do use the
+    /// database — not long-lived sockets or streams.
+    public enum ConnectionAcquisition: Sendable {
+        case lazy
+        case waiting(timeout: Duration)
+    }
+
     public func withPostgresTransactions<T>(
         in scope: Scope,
         datasource name: String = PrimaryDataSource.name,
+        acquiring acquisition: ConnectionAcquisition = .lazy,
+        _ body: () async throws -> T
+    ) async throws -> T {
+        guard case .waiting(let timeout) = acquisition else {
+            return try await bindPostgresTransactions(in: scope, datasource: name, body)
+        }
+
+        let source = try resolve(PostgresDataSource.self, qualifier: name)
+        let connection = try await source.checkout(waitingUpTo: timeout)
+        let offer = PendingConnections.Offer(connection)
+        defer {
+            // If no scoped component ever asked, nothing leased it and the
+            // lease's deinit will never run — so this returns it.
+            if offer.take(as: PostgresConnection.self) != nil {
+                source.release(connection)
+            }
+        }
+        return try await PendingConnections.$offers.withValue([name: offer]) {
+            try await bindPostgresTransactions(in: scope, datasource: name, body)
+        }
+    }
+
+    private func bindPostgresTransactions<T>(
+        in scope: Scope,
+        datasource name: String,
         _ body: () async throws -> T
     ) async throws -> T {
         let coordinator = try resolve(PostgresTransactionCoordinator.self, qualifier: name)

@@ -37,6 +37,14 @@ extension Container {
 
         register(ScopedConnection<D>.self, qualifier: name, scope: .scoped) { container in
             let source = try container.resolve(D.self, qualifier: name)
+            // A caller that could await may have already taken a connection
+            // out of the pool for this scope — waiting for one rather than
+            // failing when the pool was full. This factory is synchronous and
+            // cannot wait, so it takes that connection when one is on offer
+            // and falls back to the non-waiting checkout otherwise.
+            if let waited: D.Connection = PendingConnections.take(datasource: name) {
+                return ScopedConnection(datasourceName: name, connection: waited, source: source)
+            }
             return ScopedConnection(
                 datasourceName: name,
                 connection: try source.checkout(),
