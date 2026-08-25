@@ -35,6 +35,7 @@ let package = Package(
 
         // Requires the "Postgres" trait.
         .library(name: "FlightDataPostgres", targets: ["FlightDataPostgres"]),
+        .library(name: "FlightSchedulerPostgres", targets: ["FlightSchedulerPostgres"]),
         .library(name: "FlightMigrate", targets: ["FlightMigrate"]),
         .library(name: "FlightMigrateCLI", targets: ["FlightMigrateCLI"]),
 
@@ -69,7 +70,7 @@ let package = Package(
         // never FlightWeb. Opting out of flight's default "Web" trait keeps
         // Hummingbird, NIO, and the TLS stack out of every consumer that
         // wants a cache or a data source but not an HTTP server.
-        .package(url: "https://github.com/Swift-Flight/flight.git", from: "0.1.0", traits: []),
+        .package(url: "https://github.com/Swift-Flight/flight.git", from: "0.2.0", traits: []),
         .package(url: "https://github.com/Swift-Flight/swift-changeset.git", from: "0.1.0"),
         .package(url: "https://github.com/Swift-Flight/hangar.git", from: "0.1.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.6.0"),
@@ -135,6 +136,19 @@ let package = Package(
                 .product(name: "FlightCore", package: "flight"),
             ],
             path: "Sources/Data/FlightDataTesting",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+
+        .target(
+            name: "FlightSchedulerPostgres",
+            dependencies: [
+                "FlightDataCore",
+                "FlightDataPostgres",
+                .product(name: "FlightScheduler", package: "flight"),
+                .product(name: "PostgresNIO", package: "postgres-nio"),
+                .product(name: "Logging", package: "swift-log"),
+            ],
+            path: "Sources/Scheduler/FlightSchedulerPostgres",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
 
@@ -264,6 +278,15 @@ let package = Package(
             name: "FlightMigrateTests",
             dependencies: ["FlightMigrate", "FlightMigrateCore", "FlightMigrateCLI", "ExampleMigrations"],
             path: "Tests/Migrate/FlightMigrateTests"
+        ),
+        .testTarget(
+            name: "FlightSchedulerPostgresTests",
+            dependencies: [
+                "FlightSchedulerPostgres",
+                .product(name: "FlightScheduler", package: "flight"),
+            ],
+            path: "Tests/Scheduler/FlightSchedulerPostgresTests",
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "FlightDataPostgresTests",

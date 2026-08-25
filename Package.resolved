@@ -1,13 +1,13 @@
 {
-  "originHash" : "7ef96c519cccfee9fba02ffc684a97f0c58721cb0fa948913b6d7e2f10eeafeb",
+  "originHash" : "ac1e447436fc4ae844d3677c541f64977b2f22a5549028973c520dd9a0f609f8",
   "pins" : [
     {
       "identity" : "flight",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Swift-Flight/flight.git",
       "state" : {
-        "revision" : "ffc1707ffb192095976ff06d302e80f45db9bb5e",
-        "version" : "0.1.2"
+        "revision" : "41b5213d52d53cc7b52618ea64c597b8fb27ae83",
+        "version" : "0.2.0"
       }
     },
     {
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Swift-Flight/hangar.git",
       "state" : {
-        "revision" : "9e55185f099b2ab27ea95f341ae0efec807852c5",
-        "version" : "0.1.0"
+        "revision" : "c8d4dd0fd819ac8e42c2dba5b48755898352e24b",
+        "version" : "0.2.0"
       }
     },
     {

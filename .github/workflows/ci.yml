@@ -150,7 +150,8 @@ jobs:
           mkdir -p ./docs
           for target in FlightDataCore FlightCache FlightDataPostgres \
                         FlightDataValkey FlightCacheValkey FlightDataTesting \
-                        FlightMigrate FlightMigrateCore; do
+                        FlightMigrate FlightMigrateCore \
+                        FlightSchedulerPostgres; do
             echo "::group::$target"
             swift package --enable-all-traits \
               --allow-writing-to-directory "./docs/$target" \
