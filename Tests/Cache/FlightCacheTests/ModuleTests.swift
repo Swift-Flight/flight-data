@@ -24,35 +24,41 @@ struct ModuleTests {
     }
 
     @Test("without an adapter module, the in-memory store is the cache")
-    func inMemoryDefault() throws {
-        defer { FlightCaches.uninstall() }
-        let application = try Flight.assemble(
-            configuration: Configuration(values: ["cache.memory.max_entries": "5"]),
-            modules: [FlightCacheModule.self])
-        let store = try application.container.resolve((any Cache).self)
-        let memory = try #require(store as? InMemoryCache)
-        #expect(memory.maxEntries == 5)
-        #expect(FlightCaches.isInstalled)
+    func inMemoryDefault() async throws {
+        try await GlobalCacheSeam.exclusive {
+            defer { FlightCaches.uninstall() }
+            let application = try Flight.assemble(
+                configuration: Configuration(values: ["cache.memory.max_entries": "5"]),
+                modules: [FlightCacheModule.self])
+            let store = try application.container.resolve((any Cache).self)
+            let memory = try #require(store as? InMemoryCache)
+            #expect(memory.maxEntries == 5)
+            #expect(FlightCaches.isInstalled)
+        }
     }
 
     @Test("a registered adapter store wins over the in-memory default")
-    func adapterComposesByPresence() throws {
-        defer { FlightCaches.uninstall() }
-        let application = try Flight.assemble(
-            configuration: Configuration(),
-            modules: [FlightCacheModule.self, RecordingAdapterModule.self])
-        let store = try application.container.resolve((any Cache).self)
-        #expect(store is RecordingCache)
-        #expect(FlightCaches.isInstalled)
+    func adapterComposesByPresence() async throws {
+        try await GlobalCacheSeam.exclusive {
+            defer { FlightCaches.uninstall() }
+            let application = try Flight.assemble(
+                configuration: Configuration(),
+                modules: [FlightCacheModule.self, RecordingAdapterModule.self])
+            let store = try application.container.resolve((any Cache).self)
+            #expect(store is RecordingCache)
+            #expect(FlightCaches.isInstalled)
+        }
     }
 
     @Test("a non-positive LRU bound fails bootstrap, not the first request")
-    func invalidMaxEntriesFailsBootstrap() {
-        defer { FlightCaches.uninstall() }
-        #expect(throws: (any Error).self) {
-            _ = try Flight.assemble(
-                configuration: Configuration(values: ["cache.memory.max_entries": "0"]),
-                modules: [FlightCacheModule.self])
+    func invalidMaxEntriesFailsBootstrap() async throws {
+        try await GlobalCacheSeam.exclusive {
+            defer { FlightCaches.uninstall() }
+            #expect(throws: (any Error).self) {
+                _ = try Flight.assemble(
+                    configuration: Configuration(values: ["cache.memory.max_entries": "0"]),
+                    modules: [FlightCacheModule.self])
+            }
         }
     }
 

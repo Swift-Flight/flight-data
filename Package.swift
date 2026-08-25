@@ -307,7 +307,7 @@ let package = Package(
         .testTarget(
             name: "FlightCacheValkeyTests",
             dependencies: [
-                "FlightCacheValkey", "FlightCache",
+                "FlightCacheValkey", "FlightCache", "FlightCacheTesting",
                 .product(name: "FlightCore", package: "flight"),
                 .product(name: "Valkey", package: "valkey-swift", condition: .when(traits: ["Valkey"])),
             ],
