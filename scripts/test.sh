@@ -55,6 +55,17 @@ done
 docker exec "$pg_name" pg_isready -U postgres >/dev/null 2>&1 || {
   echo "postgres did not become ready" >&2; exit 1; }
 
+# Valkey needs the same wait. It usually wins the race against a Swift build,
+# but "usually" is how a suite becomes intermittently red for reasons nobody
+# can reproduce.
+echo "── waiting for valkey"
+for _ in $(seq 1 60); do
+  docker exec "$vk_name" valkey-cli ping 2>/dev/null | grep -q PONG && break
+  sleep 1
+done
+docker exec "$vk_name" valkey-cli ping 2>/dev/null | grep -q PONG || {
+  echo "valkey did not become ready" >&2; exit 1; }
+
 export FLIGHT_POSTGRES_TEST_DATABASE_URL="postgres://postgres:flight@127.0.0.1:$pg_port/flight_test" FLIGHT_MIGRATE_TEST_DATABASE_URL="postgres://postgres:flight@127.0.0.1:$pg_port/flight_test" FLIGHT_VALKEY_TEST_URL="redis://127.0.0.1:$vk_port"
 echo "── running the suite"
 ./CI/run-tests.sh "$@"

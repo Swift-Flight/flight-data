@@ -95,7 +95,7 @@ public enum DataSourceError: Error, Sendable, Equatable, CustomStringConvertible
     case closed(datasource: String)
     /// A checkout arrived before the pool's service reached `run()`.
     ///
-    /// Distinct from ``closed``: that pool is finished, this one has not
+    /// Distinct from ``closed(datasource:)``: that pool is finished, this one has not
     /// begun. Usually a component resolving a connection during module
     /// configuration rather than from a request scope.
     case notStarted(datasource: String)
