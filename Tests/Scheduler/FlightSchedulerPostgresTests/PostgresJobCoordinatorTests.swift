@@ -132,6 +132,13 @@ struct PostgresJobCoordinatorTests {
         let coordinator = PostgresJobCoordinator(
             dataSource: dataSource, table: "odd\"name", owner: "test")
         try await coordinator.createTableIfNeeded()
+        // Self-cleaning: the table survives between runs when the test
+        // containers are reused, and a leftover lease would make the claim
+        // below fail for a reason that has nothing to do with quoting.
+        try await dataSource.withConnection { connection in
+            _ = try await connection.query(
+                #"TRUNCATE "odd""name""#, logger: .init(label: "test"))
+        }
         let result10 = try await coordinator.claim(job: "j", scheduledFor: epoch)
         #expect(result10)
         _ = try await coordinator.prune(olderThan: .seconds(0))

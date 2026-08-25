@@ -28,7 +28,31 @@ enum TestServer: String, CaseIterable, Sendable, CustomStringConvertible {
         }
     }
 
-    var url: String? { ProcessInfo.processInfo.environment[environmentKey] }
+    /// The configured URL, pinned to a database index of this suite's own.
+    ///
+    /// These tests `flushdb`, and so do FlightDataValkeyTests — two suites in
+    /// two targets, each `.serialized` only against itself. Sharing one
+    /// database meant one suite could wipe the other mid-test: a key would be
+    /// set, read back successfully, and then report `pttl == -2` two lines
+    /// later because the other suite had flushed underneath it.
+    ///
+    /// The database index is exactly the tool for this and works across
+    /// processes, which an in-process lock would not. Cache tests use 1, data
+    /// tests use 2, and neither touches whatever a developer left in 0.
+    var url: String? {
+        guard let base = ProcessInfo.processInfo.environment[environmentKey] else { return nil }
+        return Self.selectingDatabase(1, in: base)
+    }
+
+    /// Replaces or appends the URL's database-index path component.
+    static func selectingDatabase(_ index: Int, in url: String) -> String {
+        guard let marker = url.range(of: "://") else { return url }
+        let afterScheme = url[marker.upperBound...]
+        if let slash = afterScheme.firstIndex(of: "/") {
+            return String(url[..<slash]) + "/\(index)"
+        }
+        return url + "/\(index)"
+    }
 
     static let available: [TestServer] = allCases.filter { $0.url != nil }
 

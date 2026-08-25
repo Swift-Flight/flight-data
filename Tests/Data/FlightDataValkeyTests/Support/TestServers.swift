@@ -34,8 +34,22 @@ enum TestServer: String, CaseIterable, Sendable, CustomStringConvertible {
         }
     }
 
+    /// The configured URL, pinned to a database index of this suite's own.
+    ///
+    /// These tests `flushdb`, and so do FlightCacheValkeyTests — two suites
+    /// in two targets, each `.serialized` only against itself. Sharing one
+    /// database meant one suite could wipe the other mid-test. The database
+    /// index is exactly the tool for this and works across processes, which
+    /// an in-process lock would not. Data tests use 2, cache tests use 1,
+    /// and neither touches whatever a developer left in 0.
     var url: String? {
-        ProcessInfo.processInfo.environment[environmentKey]
+        guard let base = ProcessInfo.processInfo.environment[environmentKey] else { return nil }
+        guard let marker = base.range(of: "://") else { return base }
+        let afterScheme = base[marker.upperBound...]
+        if let slash = afterScheme.firstIndex(of: "/") {
+            return String(base[..<slash]) + "/2"
+        }
+        return base + "/2"
     }
 
     /// Every server the environment configures — what integration tests are
