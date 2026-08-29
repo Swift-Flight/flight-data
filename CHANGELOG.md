@@ -183,6 +183,16 @@ the thing that kept manufacturing them.
   configured timeout reaches the acquisition, `nil` passes through as "wait
   indefinitely", and a run that cannot get the lock changes nothing.
 
+## [0.3.1] - 2026-08-25
+
+### Changed
+
+- Requires flight 0.2.2 and hangar 0.2.1. The waiting checkout and the cache's
+  unloaded-adapter cross-check need Core's
+  `Configuration.requireNoUnloadedAdapter`, added in flight 0.2.2. (Tagged at
+  the time without a changelog entry; recorded here so the tags and this file
+  agree.)
+
 ## [0.3.0] - 2026-08-25
 
 ### Added
