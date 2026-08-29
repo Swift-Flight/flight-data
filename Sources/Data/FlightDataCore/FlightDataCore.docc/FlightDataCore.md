@@ -22,9 +22,13 @@ transaction — and releases it when that scope ends. A component resolves it
 like anything else:
 
 ```swift
-@Service
-final class OrderRepository: Sendable {
-    @Autowired var connection: ScopedConnection
+@Repository(scope: .scoped)
+struct OrderRepository {
+    // Generic in its pool, and qualified by the datasource name — the
+    // unqualified, un-parameterized spelling this page used to show does not
+    // compile, because `ScopedConnection` has nothing to bind to without both.
+    @Autowired(qualifier: "primary")
+    var connection: ScopedConnection<PostgresDataSource>
 }
 ```
 

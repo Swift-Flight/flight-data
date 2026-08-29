@@ -2,35 +2,26 @@
 
 Declarative caching for Flight: annotate a method and its results are cached
 and served from cache on subsequent calls with the same inputs — Spring's
-`@Cacheable`/`@CacheEvict`/`@CachePut` analogue with **compile-time
-expansion in place of runtime proxies**. Implements
-Flight Core (as revised
-2026-08-22) on top of Flight Core.
+`@Cacheable`/`@CacheEvict`/`@CachePut` analogue with **compile-time expansion
+in place of runtime proxies**, on top of Flight Core.
 
 | Piece | Contents |
 |---|---|
-| `Cache` + `CacheKey` |: the entire cross-store seam — four async, non-throwing, `Data`-valued methods; injective, prefix-safe key encoding |
-| `@Cacheable` / `@CacheEvict` / `@CachePut` |: body macros expanding INTO the method body — no proxy, so self-invocation caches (the Spring footgun that cannot occur here) |
-| `CacheKeyContributing` |: explicit, compiler-checked key derivation; primitives ship, custom types conform deliberately |
-| `CacheCodec` / `JSONCacheCodec` |: Codable values, JSON by default, decode failure = miss |
+| `Cache` + `CacheKey` | The entire cross-store seam — four async, non-throwing, `Data`-valued methods; injective, prefix-safe key encoding |
+| `@Cacheable` / `@CacheEvict` / `@CachePut` | Body macros expanding INTO the method body — no proxy, so self-invocation caches (the Spring footgun that cannot occur here) |
+| `CacheKeyContributing` | Explicit, compiler-checked key derivation; primitives ship, custom types conform deliberately |
+| `CacheCodec` / `JSONCacheCodec` | Codable values, JSON by default, decode failure = miss |
 | `CacheRuntime` + `FlightCaches` | The runtime the expansions call, reached through a `FlightTransactions`-style seam (task-local override → installed runtime → warn-once no-op) |
-| `SingleFlight` |: local stampede protection — leader computes inline, waiters receive the encoded bytes, errors propagate, cancellation hands leadership over |
-| `InMemoryCache` |: actor-guarded `OrderedDictionary` LRU with TTL, bounded by default |
-| `FlightCacheModule` |: compose-by-presence — an adapter registered under `FlightCacheModule.storeQualifier` wins, else in-memory |
+| `SingleFlight` | Local stampede protection — leader computes inline, waiters receive the encoded bytes, errors propagate, cancellation hands leadership over |
+| `InMemoryCache` | Actor-guarded LRU with TTL, bounded by default; hit, insert and evict are all O(1) |
+| `FlightCacheModule` | Compose-by-presence — an adapter registered under `FlightCacheModule.storeQualifier` wins, else in-memory |
 | `FlightCacheTesting` | `RecordingCache` — recording, seedable, `misbehave()`-able store for consumer tests |
 
-The Valkey/Redis adapter is
-[`../flight-cache-valkey`](../flight-cache-valkey) — a **separate package**
-that this one knows nothing about.
-
-## Build status
-
-**Builds and passes all tests** — verified 2026-08-22 against Swift 6.2.3 on
-Linux (x86_64): 51 tests green (11 macro-expansion fixtures, 40 runtime
-tests), including the real-macro end-to-end suite (self-invocation caching,
-`@CachePut`/`@CacheEvict` targeting `@Cacheable` entries across methods,
-fail-open with no runtime installed) and the single-flight suite
-(coalescing, shared errors, leader-cancellation handover).
+The Valkey/Redis adapter is [`FlightCacheValkey`](cache-valkey.md), a target
+in **this** package behind the `Valkey` trait. It was a separate package
+once, and this page said so long after it stopped being true; the traits are
+what make co-location free — a consumer that does not enable `Valkey`
+resolves none of its dependencies.
 
 ## Using it
 
@@ -90,7 +81,7 @@ package's intent, in its spirit.
   expansion emits `try await`/`await` to match. The non-throwing waiter
   cannot rethrow a throwing leader's error (possible only via a
   cross-method shared key), so it computes directly instead.
-- **C2 — typed throws is rejected at the annotation site.** shared
+- **C2 — typed throws is rejected at the annotation site.** The shared
   failure semantics propagate waiter errors as `any Error`; a
   `throws(SpecificError)` method could not re-throw them. Diagnosed, not
   silently mis-expanded.
@@ -99,10 +90,10 @@ package's intent, in its spirit.
   (`FlightCaches.$override.withValue`), and a process-global alone would
   make parallel test isolation impossible. Order: override → installed →
   warn-once no-op.
-- **C4 — the empty key segment escapes to `\e`.** encoding spec left
-  one collision open (`parts: []` vs `parts: [""]` both rendering a bare
-  prefix); a reserved marker for the empty segment closes it while keeping
-  the common case (`prices:123:eu`) readable in the store.
+- **C4 — the empty key segment escapes to `\e`.** The plain escaping rule
+  left one collision open (`parts: []` vs `parts: [""]` both rendering a
+  bare prefix); a reserved marker for the empty segment closes it while
+  keeping the common case (`prices:123:eu`) readable in the store.
 - **C5 — metric counters are memoized per namespace.** swift-metrics
   creates a backend handler per `Counter(label:dimensions:)` construction;
   hot cache paths would otherwise construct one per call.
@@ -114,3 +105,29 @@ package's intent, in its spirit.
   as a delay, which silently stops testing the intended interleaving on a
   loaded machine. The concurrency suite now establishes every ordering by
   signal and contains no sleeps.
+- **C7 — the LRU order is a hand-rolled intrusive list.** `InMemoryCache`
+  used an `OrderedDictionary`, refreshing recency by removing the key and
+  reinserting it. That reads as O(1) and is not: an ordered dictionary keeps
+  keys and values in dense arrays, so removing anything but the last element
+  shifts everything after it — at the default 10,000-entry bound, every
+  **hit** paid a ~10,000-element double-array shift. A doubly-linked list
+  threaded through the entries makes touch, insert and evict pointer
+  rewrites.
+
+## What a hit actually costs
+
+Worth knowing before sizing anything: an in-memory hit is not free, and not
+because of the store. Values cross the `Cache` seam as `Data`, so every hit
+pays a JSON decode, and the decoder is constructed per call. That is
+deliberate — waiters in a single flight receive encoded bytes, and the
+in-memory adapter behaving exactly like the Valkey one is what makes swapping
+them a configuration change rather than a behaviour change — but it means the
+in-memory adapter is a *cache*, not a memoization table. Caching a value that
+is expensive to decode and cheap to compute is a loss.
+
+## `@CachePut` and nil
+
+`@CachePut` always overwrites, and that includes nil: a body returning nil
+**evicts** the entry rather than leaving what was there. It used to skip the
+write and leave the old value, so a method that had just removed something
+handed the removed thing back to the next reader.

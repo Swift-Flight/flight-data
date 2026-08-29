@@ -40,10 +40,18 @@ adding a file is all it takes — there is no list to keep in sync, and no way
 for a migration to exist but never run because someone forgot to register it.
 
 ```swift
+// The package is flight-data, and the Postgres trait is required — without it
+// the migration products are declared but hard-error at build time.
+.package(
+    url: "https://github.com/Swift-Flight/flight-data.git",
+    from: "0.4.0",
+    traits: ["Postgres"]
+)
+
 .target(
     name: "MyAppMigrations",
-    dependencies: [.product(name: "FlightMigrate", package: "flight-migrate")],
-    plugins: [.plugin(name: "FlightMigratePlugin", package: "flight-migrate")]
+    dependencies: [.product(name: "FlightMigrate", package: "flight-data")],
+    plugins: [.plugin(name: "FlightMigratePlugin", package: "flight-data")]
 )
 ```
 

@@ -19,7 +19,7 @@
 /// `checkout()`/`release(_:)` are therefore the pool's primitives, and
 /// `withConnection` ships as a derived default on top of them.
 ///
-/// ## Queueing (design delta D2)
+/// ## Queueing (design delta D8)
 ///
 /// `checkout()` returning promptly-or-throwing is a property of the
 /// *synchronous* primitive, not a policy for the whole seam — and it was read
@@ -51,11 +51,14 @@ public protocol DataSource: Sendable {
     /// Check out a connection from the pool.
     ///
     /// Synchronous because its two callers are synchronous: the scoped
-    /// `ScopedConnection` factory and, eventually, a store package's
-    /// transaction coordinator (`FlightTransactionCoordinator.begin` is
-    /// synchronous by Flight Core). Implementations return promptly —
-    /// a free connection or a typed error (`DataSourceError.poolExhausted`,
-    /// `.closed`) — and never park the calling thread.
+    /// `ScopedConnection` factory and a store package's transaction
+    /// coordinator (`FlightTransactionCoordinator.begin` is synchronous by
+    /// Flight Core). Implementations return promptly — a free connection or a
+    /// typed error from `DataSourceError` — and never park the calling thread.
+    ///
+    /// Every error thrown here is a `DataSourceError`: that is the portable
+    /// vocabulary a store-agnostic caller reacts to without knowing the store,
+    /// and `DataSourceConformance` checks it.
     func checkout() throws -> Connection
 
     /// Check out a connection, queueing up to `timeout` for one to come back
@@ -81,7 +84,10 @@ public protocol DataSource: Sendable {
     ///
     /// Non-throwing: release runs on cleanup paths (scope close, the error
     /// leg of `withConnection`) where a thrown error would mask the original.
-    /// Implementations log failures instead.
+    /// Implementations log a failure, or trap on one that indicates a bug in
+    /// the caller rather than in the store — every pool here traps on a double
+    /// release or a foreign connection, because continuing past either means
+    /// handing one connection to two callers.
     func release(_ connection: Connection)
 
     /// Check out a connection for the duration of `body`, and return it to
@@ -175,7 +181,7 @@ public enum DataSourceError: Error, Sendable, Equatable, CustomStringConvertible
         case .closed(let datasource):
             return "Datasource '\(datasource)' is closed — its pool service has shut down."
         case .notStarted(let datasource):
-            return "Datasource '\(datasource)' has not started yet — its pool service has not reached run(). A connection resolved during module configuration, rather than from a request scope, will always see this."
+            return "Datasource '\(datasource)' has not started — its pool dials connections when its service runs (Flight Core), and this checkout arrived first. A connection resolved during module configuration rather than from a request scope will always see this; in tests, start the service (or call start()) before resolving connections."
         }
     }
 }

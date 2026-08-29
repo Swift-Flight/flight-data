@@ -1,6 +1,6 @@
 import Synchronization
 
-/// The parked-caller half of a pool that queues (design delta D2).
+/// The parked-caller half of a pool that queues (design delta D8).
 ///
 /// A pool needs two things to turn `pool_size` from a wall into a queue: a
 /// non-parking "is one free right now?" probe, which only the pool itself can

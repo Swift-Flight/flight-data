@@ -29,24 +29,34 @@ Swift executable.
 
 ## Installation
 
+The migration suite ships inside **flight-data**, behind its `Postgres`
+trait. Without the trait the products are still declared but hard-error at
+build time, because SwiftPM only resolves a gated dependency when some
+enabled trait reaches it — which is what keeps PostgresNIO out of a consumer
+that wanted only the cache.
+
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/flight-server/flight-migrate.git", from: "0.1.0"),
+    .package(
+        url: "https://github.com/Swift-Flight/flight-data.git",
+        from: "0.4.0",
+        traits: ["Postgres"]          // required — without it the products refuse to build
+    ),
 ],
 targets: [
     // 1. A dedicated target for your migration files, with the discovery plugin attached.
     .target(
         name: "Migrations",
-        dependencies: [.product(name: "FlightMigrate", package: "flight-migrate")],
-        plugins: [.plugin(name: "FlightMigratePlugin", package: "flight-migrate")]
+        dependencies: [.product(name: "FlightMigrate", package: "flight-data")],
+        plugins: [.plugin(name: "FlightMigratePlugin", package: "flight-data")]
     ),
     // 2. Your migrate executable — three lines of code, full CLI.
     .executableTarget(
         name: "migrate",
         dependencies: [
             "Migrations",
-            .product(name: "FlightMigrateCLI", package: "flight-migrate"),
+            .product(name: "FlightMigrateCLI", package: "flight-data"),
         ]
     ),
 ]

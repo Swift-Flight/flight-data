@@ -10,10 +10,18 @@ Registering ``PostgresDataModule`` gives the container a pooled
 `FlightDataCore`'s seam rather than PostgresNIO:
 
 ```yaml
-data:
-  postgres:
+datasource:
+  primary:                                    # the datasource NAME, not the store
     url: postgres://app@localhost:5432/app
+    pool_size: 10
+    checkout_timeout_ms: 5000                 # how long a caller queues before failing
+    reset_on_release: true                    # DISCARD ALL between scopes
 ```
+
+The key under `datasource:` is `Name.name` from the module's generic parameter
+— `primary` for `PostgresDataModule<PrimaryDataSource>`. This page showed
+`data: postgres:` for a while, which is not a prefix anything reads; copying it
+produced a bootstrap failure about a missing `datasource.primary.url`.
 
 ``PostgresDataSourceURL`` parses and validates that URL during bootstrap, so
 a typo is a startup failure with a message rather than a connection error on
@@ -69,5 +77,4 @@ database. `flight migrate` is the command-line side.
 
 ### Failure
 
-- ``PostgresDataSourceError``
 - ``PostgresDataSourceURLError``

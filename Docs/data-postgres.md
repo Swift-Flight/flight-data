@@ -14,13 +14,16 @@ is the seam between them.
 
 ## Build status
 
-**Builds and passes all tests** — verified 2026-07-16 against Swift 6.2.3 on
-Linux (x86_64): 55 tests green, including integration suites against a real
-Postgres 16 (scoping, pool lifecycle and broken-connection replacement,
-transactions with savepoint nesting, changeset apply, migrate wiring, and
-every dialect probe). The spike **succeeded** — compile-time-checked
-queries run against Postgres with three small decode/bind adaptations and no
-fallback to SQLKit; see [SPIKE-FINDINGS.md](SPIKE-FINDINGS.md).
+`./scripts/test.sh` runs everything, integration tests included, against
+throwaway servers it starts and cleans up — including the disposable Postgres
+the outage suite is allowed to stop and restart.
+
+The integration suites run against a real Postgres 16: scoping, pool lifecycle,
+broken-connection replacement and recovery from a total outage, session
+isolation in both directions, the queueing checkout, transactions with savepoint
+nesting, changeset apply, migrate wiring, every dialect probe, and the shared
+`DataSourceConformance` contract. Compile-time-checked queries run against
+Postgres with three small decode/bind adaptations and no fallback to SQLKit.
 
 ## Using it
 

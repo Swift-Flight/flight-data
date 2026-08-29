@@ -198,7 +198,7 @@ public enum DataSourceConformance {
         }
     }
 
-    /// A pool at capacity is a queue, not a wall (core delta D2): a caller
+    /// A pool at capacity is a queue, not a wall (core delta D8): a caller
     /// that can await gets the connection the moment one comes back, rather
     /// than the immediate failure the synchronous primitive gives.
     static func waitingCheckoutQueuesRatherThanFailing<Source: DataSource>(

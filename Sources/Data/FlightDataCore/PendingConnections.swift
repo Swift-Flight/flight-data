@@ -43,7 +43,7 @@ public enum PendingConnections {
 
     /// Offers by datasource name, for the duration of one unit of work.
     ///
-    /// Bind it through ``offering(_:connection:_:)`` rather than by hand:
+    /// Bind it through ``offering(_:connection:returning:_:)`` rather than by hand:
     /// `$offers.withValue([name: offer])` *replaces* the dictionary, so a
     /// nested unit of work on a second datasource erased the outer one's offer
     /// for its duration and the scoped factory fell back to a non-waiting

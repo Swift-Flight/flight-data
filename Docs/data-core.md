@@ -25,11 +25,15 @@ package honors them by *absence*:
 
 ## Build status
 
-**Builds and passes all tests** against Swift 6.2.3 on Linux (x86_64):
-`swift build` clean under strict Swift 6 concurrency; 54 tests green across
-scoping, pool semantics, config conventions, registration, module lifecycle,
-changeset dirty-tracking/validation, the driver boundary, and the
-``DataSourceConformance`` suite run against the reference driver.
+`swift test` covers this package with no server at all: scoping, pool
+semantics, queueing and offered connections, config conventions, registration,
+module lifecycle, changeset dirty-tracking and validation, the driver boundary,
+and the `DataSourceConformance` suite run against the reference driver. Builds
+clean under strict Swift 6 concurrency.
+
+Exact test counts are deliberately not written down here. They were, and they
+were wrong within a release — a number that has to be hand-updated is a number
+that ends up lying.
 
 Dependencies are Flight Core, swift-changeset, and swift-service-lifecycle.
 
@@ -37,7 +41,7 @@ Dependencies are Flight Core, swift-changeset, and swift-service-lifecycle.
 
 | Product | Contents |
 |---|---|
-| `FlightDataCore` | `DataSource` (the entire cross-store contract: `checkout`/`release`, derived `withConnection`, `ping`), `ScopedConnection` (the `.scoped` lease component), `Container.register(dataSource:)`, `DataSourceName`/`PrimaryDataSource`, `DataSourceSettings` + `DataSourceConfigKey` (key conventions), `DataSourceLiveness` (the Actuator surface), `DataSourceError` — plus the changeset layer: `Changeset<Model>`, `ValidationRule`/`CrossFieldRule`, `ValidatedChanges`/`ChangesetError`, and the `TableModel`/`TableColumn` metadata seam |
+| `FlightDataCore` | `DataSource` (the entire cross-store contract: `checkout`/`release`, `checkout(waitingUpTo:)`, derived `withConnection`, `ping`), `ConnectionWaiters` (the parked-caller machinery every queueing pool shares), `PendingConnections` (an async caller's connection offered to the scope it is about to open), `ScopedConnection` (the `.scoped` lease component), `Container.register(dataSource:)`, `DataSourceName`/`PrimaryDataSource`, `DataSourceSettings` + `DataSourceConfigKey` (key conventions), `DataSourceLiveness` (the Actuator surface), `DataSourceError` — plus the changeset layer: `Changeset<Model>`, `ValidationRule`/`CrossFieldRule`, `ValidatedChanges`/`ChangesetError`, and the `TableModel`/`TableColumn` metadata seam |
 | `FlightDataTesting` | `InMemoryDataSource` (a `DataSource` backed by nothing — real pool semantics, no store), `InMemoryDataModule<Name>` (the reference store module), `TestContainer`, and `InMemoryConnection.apply(_:to:)` (the changeset design's driver translation, in miniature) |
 
 ## Using it
@@ -123,20 +127,43 @@ try await container.withScope { scope in
 
 ## What a pool size actually means
 
-`checkout()` is synchronous by contract — Flight Core's transaction
-coordinator begins transactions synchronously, so a pool that parked the
-caller would deadlock it. The consequence is worth stating plainly rather
-than discovering under load:
+**`pool_size` is a queue depth with a timeout, not a hard ceiling.** A caller
+that can await queues for up to `datasource.<name>.checkout_timeout_ms`
+(default 5 seconds) and fails with `DataSourceError.poolExhausted` only if
+nothing comes back in that time.
 
-**`pool_size` is a hard concurrency ceiling, not a queue depth.** A checkout
-arriving with nothing free fails immediately with
-`DataSourceError.poolExhausted`; it does not wait for a connection to come
-back. There is no backpressure and no checkout timeout, because there is no
-waiting to time out.
+This page used to say the opposite — "a hard concurrency ceiling … there is no
+waiting to time out" — and that *was* true, and was a bug. `checkout()` is
+synchronous by contract, because Flight Core's transaction coordinator begins
+transactions synchronously and a pool that parked that caller would deadlock
+it. But "the synchronous primitive cannot wait" was read as "the seam does not
+queue", and so the (pool_size + 1)th concurrent request returned 500 instead of
+waiting a few milliseconds for the one ahead of it. Found by an application
+test that created eight issues at once against a pool of four: four succeeded,
+four failed immediately.
 
-Size the pool for peak concurrent *work*, not average throughput, and keep
-units of work short — every scope holds its connection for its whole
-lifetime, so one slow handler occupies a slot for as long as it runs.
+So there are two checkouts:
+
+| | Waits? | Who calls it |
+|---|---|---|
+| `checkout()` | No — throws the moment nothing is free | The synchronous `ScopedConnection` factory, and a transaction coordinator's `begin()` |
+| `checkout(waitingUpTo:)` | Yes, to the timeout | `withConnection`, and anything else that can await |
+
+`withConnection` is defined on the waiting one, so most callers queue without
+doing anything. A store with no native wake path still queues: the protocol
+ships a polling default, and both drivers here override it with a real handoff
+(`ConnectionWaiters`, which is shared rather than written twice).
+
+The synchronous factory is the one place that still fails fast, and it has an
+escape: an async caller that wants a *scope's* connection queued takes one up
+front and offers it through `PendingConnections.offering(_:connection:returning:)`,
+which is what `withPostgresTransactions(in:acquiring: .waiting(timeout:))` does.
+
+Sizing still matters. Every scope holds its connection for its whole lifetime,
+so one slow handler occupies a slot for as long as it runs — queueing turns
+that into latency rather than errors, which is better but not free. Watch
+`waitingCallers.peak`: a pool that is too small says so there before it says so
+as timeouts.
 
 ## Testing a driver
 
@@ -145,19 +172,29 @@ runs the whole thing in one test:
 
 ```swift
 @Test func conformsToDataSourceContract() async throws {
-    try await DataSourceConformance.verify {
-        try await MyDataSource(settings: .test)
-    } shutdown: { source in
-        await source.shutdown()
-    }
+    try await DataSourceConformance.verify(
+        make: {
+            let source = try MyDataSource(settings: .test)
+            try await source.start()
+            return source
+        },
+        shutdown: { await $0.shutdown() })
 }
 ```
 
-It checks the six properties that were previously re-derived by hand in each
-driver's own tests: checkout yields a usable connection, release returns it,
-`withConnection` releases on throw, `withConnection` is callable from
-actor-isolated code, exhaustion is a typed error rather than a hang, and
-checkout after shutdown is refused.
+It checks the properties that were previously re-derived by hand in each
+driver's own tests: checkout yields a usable connection, release makes it
+available to the next caller *when the pool is genuinely empty* (rather than
+after eight sequential checkout/release pairs, which proved nothing for any
+pool of eight or more), `withConnection` releases on throw and is callable from
+actor-isolated code, concurrent callers are never over-issued, exhaustion is a
+typed error rather than a hang, the waiting checkout queues and then gives up at
+its deadline, `ping()` answers on a live source including a saturated one, and
+checkout after shutdown is refused with the vocabulary the protocol promises.
+
+Run it. It is only worth having if drivers use it, and for a while neither of
+the two in this package did — which is precisely the failure it was written to
+end.
 
 ## Changesets
 
@@ -208,13 +245,14 @@ state; nil-ness is exclusively `validateRequired`'s job.
 
 | # | Delta | Why |
 |---|-------|-----|
-| D1 | `DataSource` gains `checkout()`/`release(_:)`; `withConnection` becomes a derived default on top | Scope-bound checkout runs inside Core's *synchronous* component factories; an async-only `withConnection` cannot be bridged from a synchronous factory without blocking a cooperative-pool thread (deadlock on a single-threaded executor). This is the contract's own escape hatch — "extend it deliberately" — invoked once. Stores whose pools can wait for a free connection override `withConnection` with their async path. |
+| D1 | `DataSource` gains `checkout()`/`release(_:)`; `withConnection` becomes a derived default on top | Scope-bound checkout runs inside Core's *synchronous* component factories; an async-only `withConnection` cannot be bridged from a synchronous factory without blocking a cooperative-pool thread (deadlock on a single-threaded executor). This is the contract's own escape hatch — "extend it deliberately" — invoked once. |
 | D2 | The `.scoped` component is `ScopedConnection<D>` (a lease class), not the raw `Connection` | Core's `Scope` has no close hooks — close drops instances ("eligible for cleanup", Core). Return-to-pool therefore rides ARC: the lease's `deinit` releases the connection the moment the scope's storage drops it. A raw connection value (possibly a struct — Core has no opinion about the type) has nowhere to hang that behavior. |
 | D3 | Flight Core delta 11 (`Scope.active` task-local, `resolveInActiveScope`) | The gap predicted the "second consumer" would find: factories receive only the `Container`, so a scoped repository had no path to the scope's connection. Fixed in Core, where it belongs — it is Scope semantics, not data semantics. Recorded as Core delta 11 with its own test suite. |
 | D4 | `register(dataSource:)` has instance *and* factory forms, plus `name:` | Modules cannot read `Configuration` during `configure` (resolution begins at `freeze()`, Core), so the "construct the DataSource from config" step happens inside a registered factory. The instance form remains for tests and hand-wiring. |
 | D5 | `DataSourceLiveness` component per datasource | The requirement was that stores "register a liveness check surfaced by Actuator", with no mechanism named. A qualified component wrapping `ping()`, discoverable via `DataSourceLiveness.all(in:)` through Core introspection, is that mechanism — Actuator needs zero store knowledge. |
 | D6 | `TestContainer` duplicated from `FlightWebTesting` | A data test must not need the web package. Identical API; qualify by module if a target imports both. Follow-up: hoist into a shared flight-testing package. |
 | D7 | `InMemoryDataModule` requires no `url` key | The in-memory store is "backed by nothing"; requiring a URL it would ignore breaks the `TestContainer.build { InMemoryDataModule() }` one-liner. `pool_size` is honored when present (default 4). Real store modules load `DataSourceSettings`, whose `url` is required. |
+| D8 | `checkout(waitingUpTo:)` joins the contract; `withConnection` is defined on it, and `ConnectionWaiters` is shared | D1's synchronous checkout describes a *primitive*, and it got read as a policy: `pool_size` became a hard concurrency ceiling and a burst past it failed rather than queueing for a few milliseconds. A caller that can await should queue, so the async checkout is a protocol requirement with a polling default — every store queues — that a pool with a native wake path overrides. The parked-caller state machine lives in core rather than in each driver: the two pools here had already drifted apart on four separate fixes (outage backoff, ping under saturation, session reset, queueing itself), and a second copy of this would have been the fifth. |
 
 Changeset decisions:
 

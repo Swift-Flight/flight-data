@@ -45,7 +45,7 @@ public final class ValkeyDataSource: DataSource, Sendable {
     public let name: String
     /// Fixed pool size: every connection is dialed at `start()`; checkout
     /// never grows the pool — a caller past the ceiling queues rather than
-    /// growing it (core delta D2).
+    /// growing it (core delta D8).
     public let poolSize: Int
     /// The parsed `datasource.<name>.url`.
     public let url: ValkeyDataSourceURL
@@ -396,7 +396,7 @@ public final class ValkeyDataSource: DataSource, Sendable {
 
     /// Checks a connection out, waiting up to `timeout` for one to come back.
     ///
-    /// The seam's async primitive (core delta D2), overriding the polling
+    /// The seam's async primitive (core delta D8), overriding the polling
     /// default with this pool's native handoff: a release wakes the
     /// longest-parked caller directly rather than being noticed on a poll.
     public func checkout(waitingUpTo timeout: Duration) async throws -> ValkeyConnection {
@@ -415,7 +415,7 @@ public final class ValkeyDataSource: DataSource, Sendable {
             case .closed:
                 throw DataSourceError.closed(datasource: name)
             case .idle:
-                throw ValkeyDataSourceError.notStarted(datasource: name)
+                throw DataSourceError.notStarted(datasource: name)
             case .running:
                 break
             }
@@ -576,21 +576,4 @@ public final class ValkeyDataSource: DataSource, Sendable {
     public var retiredConnections: Int { state.withLock { $0.totalRetired } }
     public var isRunning: Bool { state.withLock { $0.phase == .running } }
     public var isClosed: Bool { state.withLock { $0.phase == .closed } }
-}
-
-/// Valkey-specific pool errors beyond the store-agnostic `DataSourceError`
-/// vocabulary.
-public enum ValkeyDataSourceError: Error, Sendable, Equatable, CustomStringConvertible {
-    /// Checkout before the pool's service started. Under real bootstrap this
-    /// is unreachable (Flight Core: services start before requests are
-    /// served); reaching it means a test harness resolved a connection
-    /// without starting the module's service.
-    case notStarted(datasource: String)
-
-    public var description: String {
-        switch self {
-        case .notStarted(let datasource):
-            return "Datasource '\(datasource)' has not started — its pool dials connections when its service runs (Flight Core). In tests, start the service (or call start()) before resolving connections."
-        }
-    }
 }

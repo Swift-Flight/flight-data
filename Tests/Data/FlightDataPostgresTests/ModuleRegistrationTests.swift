@@ -84,7 +84,11 @@ struct ModuleRegistrationTests {
     @Test func checkoutBeforeServiceStartThrows() throws {
         let container = try build()
         let source = try container.resolve(PostgresDataSource.self, qualifier: "primary")
-        #expect(throws: PostgresDataSourceError.notStarted(datasource: "primary")) {
+        // The portable vocabulary, not a driver-local twin of it: a
+        // store-agnostic caller reacts to `DataSourceError` without knowing
+        // which driver it is talking to, and each driver shadowing this case
+        // with its own enum defeated exactly that.
+        #expect(throws: DataSourceError.notStarted(datasource: "primary")) {
             _ = try source.checkout()
         }
     }

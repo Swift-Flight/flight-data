@@ -45,7 +45,7 @@ you need.
 | Product | What it is |
 | --- | --- |
 | `FlightCache` | Cache protocol, in-memory implementation, single-flight coalescing, `@Cacheable`. |
-| `FlightDataCore` | `DataSource`, connection and transaction protocols, changeset integration. |
+| `FlightDataCore` | `DataSource`, scope-bound connection checkout and queueing, changeset integration. Deliberately **no** shared transaction abstraction — `@Transactional` is defined by the Postgres driver, on top of the one thing that is genuinely shared. |
 | `FlightMigrateCore` | Migration discovery and ordering, plus the build tool plugin — no driver required. |
 | `FlightDataPostgres` | PostgreSQL data source over PostgresNIO, with Hangar for queries. |
 | `FlightPubSubValkey` | Carries Flight's PubSub between nodes over Valkey, which makes Channels broadcast, Presence membership, and `ClusteredPubSub` work across servers. Requires the `Valkey` trait. |
@@ -77,11 +77,6 @@ consumer and asserting no gated dependency reached it.
 
 Swift 6.2+, macOS 15+ or Linux. Strict concurrency throughout.
 
-## Testing
-
-`swift test --enable-all-traits` — 375 tests. Postgres and Valkey integration
-suites skip unless pointed at a live instance.
-
 ## Running the tests
 
 ```bash
@@ -89,10 +84,16 @@ suites skip unless pointed at a live instance.
 ./scripts/test.sh --filter Foo    # arguments pass through to swift test
 ```
 
-It starts throwaway servers, runs the suite, and removes them. The
-integration suites skip without a database, and a skipped suite is not a
+It starts throwaway servers, runs the suite, and removes them — including the
+disposable Postgres and Valkey the outage suites are allowed to stop and
+restart mid-test, which are separate from the shared ones so that killing a
+server does not take the rest of the suite with it.
+
+`swift test --enable-all-traits` on its own runs everything that needs no
+server. The integration suites skip without one, and a skipped suite is not a
 passing one — what this package proves against real infrastructure is most of
-what it is for.
+what it is for, which is also why the outage suites are wired into the script
+rather than gated on a variable nobody sets.
 
 `FLIGHT_KEEP_SERVERS=1` leaves the containers up between runs.
 

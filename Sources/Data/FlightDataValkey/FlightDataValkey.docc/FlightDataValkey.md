@@ -1,7 +1,7 @@
 # ``FlightDataValkey``
 
-The Valkey driver: a pooled `DataSource`, raw commands, and `MULTI`
-batches.
+The Valkey driver: a pooled `DataSource`, valkey-swift's typed commands, and
+`MULTI` batches.
 
 ## Overview
 
@@ -10,10 +10,18 @@ Registering ``ValkeyDataModule`` gives the container a pooled
 way it would for Postgres:
 
 ```yaml
-data:
-  valkey:
-    url: redis://localhost:6379
+datasource:
+  primary:                             # the datasource NAME, not the store
+    url: redis://localhost:6379/2      # the path segment is the database index
+    pool_size: 10
+    checkout_timeout_ms: 5000          # how long a caller queues before failing
+    reset_on_release: true             # clear session state between scopes
 ```
+
+The key under `datasource:` is `Name.name` from the module's generic parameter
+— `primary` for `ValkeyDataModule<PrimaryDataSource>`. This page showed
+`data: valkey:` for a while, which is not a prefix anything reads; copying it
+produced a bootstrap failure about a missing `datasource.primary.url`.
 
 ``ValkeyDataSourceURL`` parses and validates that URL during bootstrap, so a
 malformed one is a startup failure with a message rather than a connection
@@ -21,11 +29,23 @@ error on the first command.
 
 ## Commands are explicit, not abstracted
 
-``ValkeyRawCommand`` is how a command is issued. There is deliberately no
-query builder and no cross-store abstraction: Valkey and Postgres do not
-answer the same questions, and a layer pretending otherwise serves neither.
-What is shared is the connection pooling and scoping, which genuinely is the
-same problem.
+The command surface is **valkey-swift's own**, generated from Valkey's command
+specifications — `connection.hset(...)`, `connection.zadd(...)`, and the rest
+— reached directly on the scoped connection. This package does not re-wrap it,
+and adds only two conveniences (`expire(_:after:)` and `zrevrange`) where a documented
+reason exists.
+
+``ValkeyRawCommand`` is the escape *hatch*, not the primary surface: anything
+the typed surface does not cover — vendor-specific commands, newly-added server
+commands, module commands. It is first-class rather than a leak, since no
+client can wrap every command of two diverging servers, but it sits **outside**
+this package's Valkey/Redis compatibility guarantee, which is the whole reason
+it is named separately.
+
+There is deliberately no query builder and no cross-store abstraction: Valkey
+and Postgres do not answer the same questions, and a layer pretending otherwise
+serves neither. What is shared is the connection pooling and scoping, which
+genuinely is the same problem.
 
 ## Batches, not transactions
 
@@ -69,6 +89,5 @@ rather than being silently dropped.
 
 ### Failure
 
-- ``ValkeyDataSourceError``
 - ``ValkeyDataSourceURLError``
 - ``ValkeyCommandError``

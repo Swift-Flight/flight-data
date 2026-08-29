@@ -1,42 +1,51 @@
 # Flight Cache Valkey
 
-The Valkey/Redis-backed adapter for [Flight Cache](../flight-cache)
-(design): namespaces as key prefixes, TTL as native expiry, required
-for multi-instance deployments where an in-memory cache would give each
-instance its own inconsistent copy.
+The Valkey/Redis-backed adapter for [Flight Cache](cache.md): namespaces as
+key prefixes, TTL as native expiry. Required for multi-instance deployments,
+where an in-memory cache gives each instance its own inconsistent copy.
 
-Deliberately **not** built on Flight Data Valkey: a cache
+Deliberately **not** built on [Flight Data Valkey](data-valkey.md): a cache
 adapter needs `GET`, `SET`, `UNLINK`, and expiry — not repositories,
 `Scope`-bound checkout, or `DataSource` conformance. Shared *library*
-dependency (valkey-swift), independent *package* dependency. And unlike the
-data package's hand-rolled lender-task pool (its delta V1), this adapter
+dependency (valkey-swift), no dependency between the two targets. And unlike
+the data driver's hand-rolled lender-task pool (its delta V1), this adapter
 holds a `ValkeyClient` — the driver's own pool, already a ServiceLifecycle
 `Service` — because the cache seam is async end to end.
 
 | Piece | Contents |
 |---|---|
-| `ValkeyCache` | +: fail-open `Cache` over `ValkeyClient` — every error is a logged, counted miss/no-op; consecutive-failure breaker with half-open probe, fed only by failures that actually indicate store ill-health (CV2) |
-| `ValkeyCacheSettings` / `ValkeyCacheURL` | `cache.valkey.*` config (its own root — caching ≠ adopting Valkey as a data store); both timeout phases (CV1), pool sizing; `valkey://`/`redis://` exact synonyms, TLS variants, auth, database |
-| `FlightCacheValkeyModule` |: registers the store under `FlightCacheModule.storeQualifier` (compose-by-presence) and runs the client pool as its service |
+| `ValkeyCache` | Fail-open `Cache` over `ValkeyClient` — every error is a logged, counted miss or no-op; consecutive-failure breaker with a half-open probe, fed only by failures that actually indicate store ill-health (CV2) |
+| `ValkeyCacheSettings` / `ValkeyCacheURL` | `cache.valkey.*` config (its own root — caching is not adopting Valkey as a data store); both timeout phases (CV1), pool sizing; `valkey://`/`redis://` exact synonyms, TLS variants, auth, database |
+| `FlightCacheValkeyModule` | Registers the store under `FlightCacheModule.storeQualifier` (compose-by-presence) and runs the client pool as its service |
+
+## Keys, and sharing one Valkey
 
 Keys are stored as `flight-cache:` + `CacheKey.storageKey`
-(`flight-cache:prices:123:eu`) — recognizable and greppable in a store that
-may hold non-cache data. Namespace eviction is `SCAN MATCH <prefix>* +
-UNLINK` in batches: O(keys) and non-atomic, per the design's stated
-trade-off.
+(`flight-cache:prices:123:eu`) — recognizable and greppable in a store that may
+hold non-cache data. Namespace eviction is `SCAN MATCH <prefix>* + UNLINK` in
+batches: O(keys) and non-atomic, deliberately.
+
+**That prefix is fixed, and there is no key-namespace setting.** Two
+applications pointed at the same Valkey *and* the same database index share a
+key space: same namespace and same arguments means the same key, so one app
+serves the other's cached value. Separate them with the URL's database index —
+`cache.valkey.url: valkey://host:6379/2` — or with separate servers. Distinct
+`cache.namespaces` names work too, but only by convention, and only for as long
+as nobody picks `users` twice.
 
 ## Build status
 
-**Builds and passes all tests** — verified 2026-08-22 against Swift 6.2.3 on
-Linux (x86_64): 22 tests green in ~1.4 s, the integration suite running
-against **both a real Valkey 8 and a real Redis 7** (the.1-compatibility
-duality), covering round-trips under the documented key shape, native TTL
-expiry, multi-batch namespace eviction (750 keys > one SCAN batch),
-prefix-collision safety, both timeout phases reaching the driver, the
-failure classification that feeds the breaker, and the dead-server path
-(every operation degrades to a miss/no-op in bounded time, and the
-adapter's breaker correctly stays closed because the pool's owns that
-case).
+`./scripts/test.sh` runs everything, integration tests included, against
+throwaway servers it starts and cleans up.
+
+The integration suite runs against **both a real Valkey 8 and a real Redis 7** —
+the two servers this package promises to work with, so the promise is checked
+rather than asserted — covering round-trips under the documented key shape,
+native TTL expiry, multi-batch namespace eviction (750 keys, more than one SCAN
+batch), prefix-collision safety, both timeout phases reaching the driver, the
+failure classification that feeds the breaker, and the dead-server path: every
+operation degrades to a miss or a no-op in bounded time, and the adapter's own
+breaker correctly stays closed, because the pool's breaker owns that case.
 
 ## Using it
 
