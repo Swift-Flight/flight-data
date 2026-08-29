@@ -43,14 +43,20 @@ public final class FlightPubSubValkeyModule: FlightModule {
         container.register(ValkeyPubSubClient.self, scope: .singleton) { container in
             let configuration = try container.resolve(Configuration.self)
             let settings = try ValkeyPubSubSettings.load(from: configuration)
-            return ValkeyPubSubClient(settings: settings)
+            return try ValkeyPubSubClient(settings: settings)
         }
 
         // Registering this is what flips FlightPubSubModule's compose-by-
         // presence choice from local to clustered.
-        container.register((any DistributedPubSubAdapter).self, scope: .singleton) { container in
+        container.register(ValkeyPubSubAdapter.self, scope: .singleton) { container in
             let client = try container.resolve(ValkeyPubSubClient.self)
-            return ValkeyPubSubAdapter(client: client.client, channel: client.channel)
+            return ValkeyPubSubAdapter(
+                client: client.client,
+                channel: client.channel,
+                retryDelay: client.retryDelay)
+        }
+        container.register((any DistributedPubSubAdapter).self, scope: .singleton) { container in
+            try container.resolve(ValkeyPubSubAdapter.self)
         }
     }
 
@@ -64,13 +70,18 @@ public final class FlightPubSubValkeyModule: FlightModule {
 public final class ValkeyPubSubClient: Sendable {
     public let client: ValkeyClient
     public let channel: String
+    public let retryDelay: Duration
 
-    init(settings: ValkeyPubSubSettings) {
+    init(settings: ValkeyPubSubSettings) throws {
+        // Throwing, because building the TLS context can fail and this runs at
+        // freeze(): a `valkeys://` URL whose TLS cannot be configured must fail
+        // bootstrap rather than quietly connecting in the clear.
         self.client = ValkeyClient(
             .hostname(settings.host, port: settings.port),
-            configuration: settings.clientConfiguration(),
+            configuration: try settings.clientConfiguration(),
             logger: Logger(label: "flight.pubsub.valkey.client"))
         self.channel = settings.channel
+        self.retryDelay = settings.retryDelay
     }
 }
 
@@ -80,6 +91,7 @@ struct ValkeyPubSubService: Service {
 
     func run() async throws {
         let client = try container.resolve(ValkeyPubSubClient.self)
+        let adapter = try container.resolve(ValkeyPubSubAdapter.self)
 
         // Shutdown is ordered on purpose: the relay's subscription must
         // unwind *before* the client pool goes away. Cancelling both at once
@@ -89,19 +101,26 @@ struct ValkeyPubSubService: Service {
         // takes the process down during what should be a graceful stop.
         // Found by a test crashing at teardown; the same race exists here.
         let pool = Task { await client.client.run() }
-        defer {
-            // The relay has returned by now, so its subscription is done.
-            pool.cancel()
-        }
+        defer { pool.cancel() }
 
         // The relay refuses if PubSub is not clustered, which would mean this
         // module registered an adapter and something else overrode the
         // composition — worth failing loudly rather than relaying into
         // nothing.
-        try await PubSubRelayService(container: container).run()
+        do {
+            try await PubSubRelayService(container: container).run()
+        } catch {
+            await adapter.drainSubscriptions()
+            throw error
+        }
 
-        // Give the subscription's teardown a moment to complete before the
-        // pool is cancelled by the defer above.
-        try? await Task.sleep(for: .milliseconds(50))
+        // The relay returning means it stopped *reading*; the subscribe loop
+        // behind `incoming()` is a separate task and may still be unwinding.
+        // This used to be `try? await Task.sleep(for: .milliseconds(50))` —
+        // which under outright cancellation throws immediately and is
+        // swallowed, so the pool was cancelled with the subscription still in
+        // flight: exactly the crash the ordering above exists to avoid, on the
+        // one path where it is most likely. Wait for the thing itself.
+        await adapter.drainSubscriptions()
     }
 }

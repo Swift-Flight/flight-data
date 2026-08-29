@@ -21,6 +21,19 @@ pubsub:
     url: valkey://localhost:6379
 ```
 
+The URL takes the same shapes as every other Valkey connection in this
+package — `valkey://` and `redis://` are synonyms, `valkeys://` and `rediss://`
+are the same with TLS, `valkey://:secret@host/2` is password-only auth against
+database 2 — and the rest of `pubsub.valkey.*` is optional:
+
+| Key | Default | What it bounds |
+|---|---|---|
+| `pubsub.valkey.url` | — | required |
+| `pubsub.valkey.channel` | `flight-pubsub` | the one channel every node shares |
+| `pubsub.valkey.command_timeout_ms` | 250 | a command on a leased connection |
+| `pubsub.valkey.unreachable_after_ms` | the command timeout | how long the pool tries to connect before failing fast |
+| `pubsub.valkey.retry_delay_ms` | 1000 | the first delay before re-subscribing |
+
 Nothing that publishes or subscribes changes. `FlightPubSubModule` composes
 by *presence*: its `any PubSub` factory runs at `freeze()`, finds a registered
 `DistributedPubSubAdapter`, and hands the application a `ClusteredPubSub`
@@ -72,17 +85,46 @@ sees a message exactly once.
 ## Reconnection
 
 A finished `incoming()` stream means "this adapter is done for good", so a
-Valkey restart must not finish it. The subscribe loop retries with backoff and
-the stream stays open; the relay above never learns it happened, beyond a gap
-in delivery.
+Valkey restart must not finish it. The subscribe loop retries and the stream
+stays open; the relay above never learns it happened, beyond a gap in delivery.
+
+The delay starts at `pubsub.valkey.retry_delay_ms`, doubles to a 30-second cap,
+and is jittered by ±50%. The jitter is the point: every node in a cluster loses
+the server at the same instant, so a fixed delay has all of them reconnect at
+the same instant too — a thundering herd aimed at a server that has just come
+back up.
+
+## What crosses the wire
+
+A small JSON header — the topic and the metadata — then the payload bytes
+verbatim:
+
+```
+"FPS1"                4 bytes, magic and version
+UInt32 big-endian     header length
+header                {"topic": …, "metadata": {…}}
+payload               the caller's bytes, untouched
+```
+
+This used to be `Codable` over the whole message, and `JSONEncoder` renders
+`Data` as base64 — so every payload byte was inflated by a third and re-encoded
+on each hop, on exactly the chat-fan-out and presence-diff traffic this is for.
+
+The magic is a version: a node running an incompatible build sees a frame it
+cannot read and drops it loudly rather than decoding it into nonsense. One
+undecodable frame never takes down the relay for every other node.
 
 ## Shutting down
 
 ``FlightPubSubValkeyModule``'s service stops the relay *before* the client
 pool, rather than cancelling both together. Releasing a subscription
 connection while it is still initializing trips a fatal assertion inside
-valkey-swift and takes the process down during what should be a graceful
-stop. Ordered shutdown avoids it.
+valkey-swift and takes the process down during what should be a graceful stop.
+
+"Before" is enforced by waiting for the subscribe loop to actually finish. It
+used to be a 50 ms sleep, which under cancellation throws immediately and was
+swallowed — so on the one path most likely to hit the race, the pool was
+cancelled with the subscription still unwinding.
 
 ## Topics
 
@@ -94,6 +136,10 @@ stop. Ordered shutdown avoids it.
 ### The adapter
 
 - ``ValkeyPubSubAdapter``
+
+### Configuration keys
+
+- ``ValkeyPubSubConfigKey``
 
 ### Failure
 

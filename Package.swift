@@ -96,7 +96,6 @@ let package = Package(
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
                 .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
                 .product(name: "SwiftDiagnostics", package: "swift-syntax"),
-                .product(name: "SwiftSyntaxBuilder", package: "swift-syntax"),
             ],
             path: "Sources/Cache/FlightCacheMacrosImpl"
         ),
@@ -166,6 +165,9 @@ let package = Package(
                 .product(name: "FlightPubSub", package: "flight"),
                 .product(
                     name: "Valkey", package: "valkey-swift",
+                    condition: .when(traits: ["Valkey"])),
+                .product(
+                    name: "NIOSSL", package: "swift-nio-ssl",
                     condition: .when(traits: ["Valkey"])),
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
@@ -333,6 +335,7 @@ let package = Package(
             name: "FlightPubSubValkeyTests",
             dependencies: [
                 "FlightPubSubValkey",
+                .product(name: "FlightCore", package: "flight"),
                 .product(name: "FlightPubSub", package: "flight"),
                 .product(
                     name: "Valkey", package: "valkey-swift",
