@@ -39,13 +39,50 @@ public enum PendingConnections {
             }
         }
 
-        /// Whether the offer is still outstanding — how the offering caller
-        /// knows whether to return the connection itself.
-        public var isUnclaimed: Bool { slot.withLock { $0 != nil } }
     }
 
     /// Offers by datasource name, for the duration of one unit of work.
+    ///
+    /// Bind it through ``offering(_:connection:_:)`` rather than by hand:
+    /// `$offers.withValue([name: offer])` *replaces* the dictionary, so a
+    /// nested unit of work on a second datasource erased the outer one's offer
+    /// for its duration and the scoped factory fell back to a non-waiting
+    /// checkout — failing with `poolExhausted` next to a connection reserved
+    /// for it.
     @TaskLocal public static var offers: [String: Offer] = [:]
+
+    /// Offers `connection` to the scope opened inside `body`, merging with any
+    /// offer an enclosing unit of work already made for another datasource.
+    ///
+    /// If nothing took it — a unit of work that touched no repository — the
+    /// connection goes to `returning`, on the throwing path as well as the
+    /// normal one. The offer is one-shot, so a second scope inside `body`
+    /// checks out its own connection rather than getting a second reference to
+    /// one already leased.
+    ///
+    /// The withdraw-or-return decision belongs here rather than at the call
+    /// site because it has to be made under the same one-shot lock that hands
+    /// the connection out: a caller checking "was it taken?" separately can be
+    /// beaten to the slot and either leak the connection or release one that
+    /// is still leased.
+    ///
+    /// - Warning: Offers are keyed by datasource *name*. Two distinct pools
+    ///   registered under one name, both reached from the same task tree, would
+    ///   see each other's offers and a taken connection could be released to
+    ///   the wrong pool. Names are the qualifier the container registers under,
+    ///   so this is not reachable through the normal module wiring.
+    public static func offering<C: Sendable, T>(
+        _ name: String,
+        connection: C,
+        returning returnConnection: (C) -> Void,
+        _ body: () async throws -> T
+    ) async rethrows -> T {
+        let offer = Offer(connection)
+        defer { if let unclaimed: C = offer.take() { returnConnection(unclaimed) } }
+        return try await $offers.withValue(offers.merging([name: offer]) { _, new in new }) {
+            try await body()
+        }
+    }
 
     /// Takes the offered connection for `datasource`, if there is one.
     public static func take<C: Sendable>(datasource name: String) -> C? {

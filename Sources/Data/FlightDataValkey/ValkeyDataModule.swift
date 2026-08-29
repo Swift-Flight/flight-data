@@ -52,7 +52,13 @@ public final class ValkeyDataModule<Name: DataSourceName>: FlightModule {
         container.register(dataSource: ValkeyDataSource.self, name: name) { container in
             let configuration = try container.resolve(Configuration.self)
             let settings = try DataSourceSettings.load(name: name, from: configuration)
-            return try ValkeyDataSource(settings: settings)
+            // Defaults on, same key and same reasoning as the Postgres twin:
+            // a pooled connection is a session, and a session that remembers
+            // `SELECT 5` across scopes reads the wrong database.
+            let reset =
+                try configuration.getIfPresent(
+                    "datasource.\(name).reset_on_release", as: Bool.self) ?? true
+            return try ValkeyDataSource(settings: settings, resetOnRelease: reset)
         }
 
         // The scope's raw connection, borrowed from the lease (design.3's

@@ -19,9 +19,10 @@ import Synchronization
 /// transaction coordinator's `begin()` is synchronous by Flight Core).
 /// So this package owns a deliberately small pool of `PostgresConnection`s:
 /// eager dial at service start, Mutex-guarded free list, prompt
-/// checkout-or-throw (never parks), broken-connection replacement in the
-/// service loop. Everything protocol-level — wire handling, TLS, encoding —
-/// stays PostgresNIO's.
+/// checkout-or-throw for the synchronous primitive, a parked queue for callers
+/// that can await (core delta D2), broken-connection replacement with backoff
+/// in the service loop. Everything protocol-level — wire handling, TLS,
+/// encoding — stays PostgresNIO's.
 ///
 /// `run()` is the module service's body: no request is served before the
 /// pool is live (Flight Core bootstrap ordering), and graceful shutdown
@@ -32,10 +33,14 @@ public final class PostgresDataSource: DataSource, Sendable {
     /// The datasource's name — config key segment and registration qualifier.
     public let name: String
     /// Fixed pool size: every connection is dialed at `start()`; checkout
-    /// never grows the pool (Flight Data Core: prompt or throw).
+    /// never grows the pool — a caller past the ceiling queues rather than
+    /// growing it (core delta D2).
     public let poolSize: Int
     /// The parsed `datasource.<name>.url`.
     public let url: PostgresDataSourceURL
+    /// How long `withConnection` queues before `poolExhausted`, from
+    /// `datasource.<name>.checkout_timeout_ms`.
+    public let checkoutTimeout: Duration
 
     private let logger: Logger
     private let state: Mutex<PoolState>
@@ -60,20 +65,19 @@ public final class PostgresDataSource: DataSource, Sendable {
         /// is offered for reuse.
         var openTransactions: Set<ObjectIdentifier> = []
         var established = 0
-        /// Connections released but not yet reset — checked out by nobody
-        /// and available to nobody until `DISCARD ALL` lands.
-        var resetsInFlight = 0
+        /// Connections released but not yet back in `available` — checked out
+        /// by nobody and available to nobody until their `ROLLBACK` and/or
+        /// `DISCARD ALL` lands. Shutdown waits on this reaching zero, so
+        /// *every* asynchronous return path has to count itself here or
+        /// shutdown races the handler that closes the connection.
+        var pendingReturns = 0
         var nextConnectionID = 0
         var totalCheckouts = 0
-        /// Callers parked in `checkout(waitingUpTo:)`, waiting for a
-        /// connection to come back. Keyed so a caller that times out can take
-        /// itself out rather than leaving an entry behind forever.
-        var waiters: [UInt64: Waiter] = [:]
-        var nextWaiterID: UInt64 = 0
-        /// The high-water mark of parked callers, for Actuator and for
-        /// answering "is the pool too small" with a number.
-        var peakWaiting = 0
     }
+
+    /// Callers parked in `checkout(waitingUpTo:)`. Core's, not this pool's —
+    /// the Valkey pool parks callers in exactly the same one.
+    private let waiters = ConnectionWaiters()
 
     /// Whether a released connection is reset with `DISCARD ALL` before it
     /// is offered to the next scope.
@@ -92,6 +96,7 @@ public final class PostgresDataSource: DataSource, Sendable {
     ) throws {
         self.name = settings.name
         self.poolSize = settings.poolSize
+        self.checkoutTimeout = settings.checkoutTimeout
         self.resetOnRelease = resetOnRelease
         // Parsed here — at freeze()'s eager singleton construction — so a
         // malformed URL fails bootstrap, not the first query ( posture).
@@ -137,7 +142,7 @@ public final class PostgresDataSource: DataSource, Sendable {
                     try? await connection.close()
                     return
                 }
-                wakeOneWaiter()
+                waiters.wakeOne()
             }
             logger.info("postgres pool started", metadata: [
                 "datasource": "\(name)", "pool_size": "\(poolSize)",
@@ -165,7 +170,7 @@ public final class PostgresDataSource: DataSource, Sendable {
         // returning before they run would report a pool that still holds
         // connections it is in the middle of letting go.
         state.withLock { $0.phase = .closed }
-        await drainPendingResets()
+        await drainPendingReturns()
 
         let toClose = state.withLock { state -> [PostgresConnection] in
             let connections = state.available
@@ -180,17 +185,17 @@ public final class PostgresDataSource: DataSource, Sendable {
         logger.info("postgres pool closed", metadata: ["datasource": "\(name)"])
     }
 
-    /// Waits for outstanding `DISCARD ALL`s to finish, so shutdown does not
-    /// race the handlers that close their connections.
-    private func drainPendingResets() async {
+    /// Waits for outstanding `ROLLBACK`s and `DISCARD ALL`s to finish, so
+    /// shutdown does not race the handlers that close their connections.
+    private func drainPendingReturns() async {
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while state.withLock({ $0.resetsInFlight }) > 0 {
+        while state.withLock({ $0.pendingReturns }) > 0 {
             guard ContinuousClock.now < deadline else {
                 logger.warning(
-                    "gave up waiting for session resets during shutdown",
+                    "gave up waiting for connections to finish returning during shutdown",
                     metadata: [
                         "datasource": "\(name)",
-                        "outstanding": "\(state.withLock { $0.resetsInFlight })",
+                        "outstanding": "\(state.withLock { $0.pendingReturns })",
                     ])
                 return
             }
@@ -210,7 +215,18 @@ public final class PostgresDataSource: DataSource, Sendable {
         )
     }
 
+    /// Backoff between failed replacement dials: doubles from 100ms, capped
+    /// at 5s, so an outage costs a handful of attempts a minute rather than a
+    /// spin. Same numbers as Flight Data Valkey's pool, deliberately — the
+    /// two are the same machine and drifting apart is how one of them ends up
+    /// with a bug the other already fixed.
+    private static let minimumReplacementBackoff = Duration.milliseconds(100)
+    private static let maximumReplacementBackoff = Duration.seconds(5)
+
     private func replaceBrokenConnections() async {
+        var backoff = Self.minimumReplacementBackoff
+        var consecutiveFailures = 0
+
         while true {
             let deficit = state.withLock { state -> Int in
                 state.phase == .running ? poolSize - state.established : 0
@@ -228,56 +244,64 @@ public final class PostgresDataSource: DataSource, Sendable {
                     try? await connection.close()
                     return
                 }
-                wakeOneWaiter()
-                logger.info("replaced broken postgres connection", metadata: ["datasource": "\(name)"])
+                waiters.wakeOne()
+                if consecutiveFailures > 0 {
+                    logger.info(
+                        "postgres reachable again; pool refilling",
+                        metadata: [
+                            "datasource": "\(name)",
+                            "failed-attempts": "\(consecutiveFailures)",
+                        ])
+                } else {
+                    logger.info(
+                        "replaced broken postgres connection",
+                        metadata: ["datasource": "\(name)"])
+                }
+                backoff = Self.minimumReplacementBackoff
+                consecutiveFailures = 0
             } catch {
-                // The server is unreachable; the next checkout/release that
-                // notices a broken connection re-triggers replacement, and
-                // pings keep Actuator honest in the meantime.
-                logger.warning("failed to replace broken postgres connection", metadata: [
-                    "datasource": "\(name)", "error": "\(error)",
-                ])
-                return
+                // Returning here is what wedged the pool. The reasoning was
+                // that "the next checkout/release re-triggers replacement" —
+                // but once every connection has been retired there are no more
+                // releases, and a checkout that finds an empty free list never
+                // reached the broken-connection branch that yields the
+                // trigger. The pool sat at zero established, answering
+                // `poolExhausted` and blaming the operator's `pool_size`,
+                // until the process was restarted: a transient outage became
+                // permanent. Flight Data Valkey hit this first and fixed it
+                // with exactly this loop; this is the port.
+                consecutiveFailures += 1
+                logger.warning(
+                    "failed to replace broken postgres connection; retrying",
+                    metadata: [
+                        "datasource": "\(name)",
+                        "error": "\(error)",
+                        "attempt": "\(consecutiveFailures)",
+                        "retry-in": "\(backoff)",
+                    ])
+
+                do {
+                    try await Task.sleep(for: backoff)
+                } catch {
+                    return  // cancelled: the service is shutting down
+                }
+                backoff = min(backoff * 2, Self.maximumReplacementBackoff)
             }
         }
     }
 
     // MARK: - DataSource
 
-    /// One parked caller. Reserved before parking so a wake that arrives
-    /// first is remembered rather than lost.
-    fileprivate enum Waiter: Sendable {
-        case reserved
-        case parked(CheckedContinuation<Void, Never>)
-        case woken
-    }
-
     /// Checks a connection out, waiting up to `timeout` for one to come back.
     ///
-    /// `checkout()` is synchronous — it has to be, because scoped components
-    /// are built inside synchronous factory bodies — and a synchronous
-    /// checkout cannot wait, so it throws the moment the pool is empty. For a
-    /// server that turns `pool_size` into a hard concurrency ceiling: the
-    /// (pool_size + 1)th simultaneous request does not queue behind the
-    /// others for a few milliseconds, it fails, and the person holding the
-    /// browser sees an error because someone else was mid-request.
-    ///
-    /// This is the same checkout for callers that can await. A pool at
-    /// capacity is a queue, not a wall, until the timeout — at which point
-    /// failing is correct, because a request that has been waiting that long
-    /// for a connection is a request nobody is still watching.
-    ///
-    /// Found by a test that created eight issues at once against a pool of
-    /// four: four succeeded and four returned 500 immediately.
+    /// The seam's async primitive (core delta D2), overriding the polling
+    /// default with this pool's native handoff: a release wakes the
+    /// longest-parked caller directly rather than being noticed on a poll.
     public func checkout(waitingUpTo timeout: Duration) async throws -> PostgresConnection {
-        if let connection = try checkoutIfAvailable() { return connection }
-
-        let deadline = ContinuousClock.now.advanced(by: timeout)
-        while ContinuousClock.now < deadline {
-            await waitForRelease(until: deadline)
-            if let connection = try checkoutIfAvailable() { return connection }
-        }
-        throw DataSourceError.poolExhausted(datasource: name, poolSize: poolSize)
+        try await waiters.checkout(
+            waitingUpTo: timeout,
+            attempt: checkoutIfAvailable,
+            exhausted: { DataSourceError.poolExhausted(datasource: name, poolSize: poolSize) })
     }
 
     /// `checkout()`'s body, with "nothing free" as a value rather than an
@@ -285,7 +309,14 @@ public final class PostgresDataSource: DataSource, Sendable {
     /// does not.
     private func checkoutIfAvailable() throws -> PostgresConnection? {
         var sawBrokenConnection = false
-        defer { if sawBrokenConnection { replacementTrigger.yield() } }
+        var poolIsEmpty = false
+        defer {
+            // The second condition is the wedge insurance: a pool at zero
+            // established has no release and no broken connection left to
+            // notice, so a checkout finding nothing is the *only* remaining
+            // event that can re-arm maintenance.
+            if sawBrokenConnection || poolIsEmpty { replacementTrigger.yield() }
+        }
 
         return try state.withLock { state in
             switch state.phase {
@@ -306,126 +337,21 @@ public final class PostgresDataSource: DataSource, Sendable {
                 state.totalCheckouts += 1
                 return connection
             }
+            poolIsEmpty = state.established == 0
             return nil
         }
-    }
-
-    /// Parks until a connection is repooled or the deadline passes.
-    ///
-    /// The waiter's slot is reserved under the lock *before* suspending, so a
-    /// release landing in the window between the two does not wake nobody.
-    private func waitForRelease(until deadline: ContinuousClock.Instant) async {
-        let id = state.withLock { state -> UInt64 in
-            state.nextWaiterID += 1
-            let id = state.nextWaiterID
-            state.waiters[id] = .reserved
-            state.peakWaiting = max(state.peakWaiting, state.waiters.count)
-            return id
-        }
-
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await self.park(id) }
-            group.addTask {
-                try? await Task.sleep(until: deadline, clock: .continuous)
-                self.wake(id)
-            }
-            await group.next()
-            group.cancelAll()
-            // Whichever finished first, the other is finished with: waking an
-            // already-woken id is a no-op, and it is what guarantees the park
-            // task cannot outlive this call.
-            self.wake(id)
-        }
-    }
-
-    private func park(_ id: UInt64) async {
-        await withCheckedContinuation { continuation in
-            let alreadyWoken = state.withLock { state -> Bool in
-                switch state.waiters[id] {
-                case .reserved:
-                    state.waiters[id] = .parked(continuation)
-                    return false
-                default:
-                    // Woken between reserving and parking. Take the slot and
-                    // resume immediately rather than sleeping through it.
-                    state.waiters[id] = nil
-                    return true
-                }
-            }
-            if alreadyWoken { continuation.resume() }
-        }
-    }
-
-    /// Wakes one specific waiter. Idempotent.
-    private func wake(_ id: UInt64) {
-        let continuation = state.withLock { state -> CheckedContinuation<Void, Never>? in
-            switch state.waiters[id] {
-            case .parked(let continuation):
-                state.waiters[id] = nil
-                return continuation
-            case .reserved:
-                // Reserved but not yet parked: mark it so `park` sees the
-                // wake instead of suspending forever.
-                state.waiters[id] = .woken
-                return nil
-            case .woken, nil:
-                return nil
-            }
-        }
-        continuation?.resume()
-    }
-
-    /// Wakes the longest-parked caller, if any. Called wherever a connection
-    /// lands back in `available`.
-    private func wakeOneWaiter() {
-        let continuation = state.withLock { state -> CheckedContinuation<Void, Never>? in
-            guard let id = state.waiters.keys.min() else { return nil }
-            switch state.waiters[id] {
-            case .parked(let continuation):
-                state.waiters[id] = nil
-                return continuation
-            case .reserved:
-                state.waiters[id] = .woken
-                return nil
-            case .woken, nil:
-                return nil
-            }
-        }
-        continuation?.resume()
     }
 
     /// How many callers are parked waiting for a connection right now, and
     /// the most there have ever been. A pool that is too small says so here
     /// before it says so as errors.
-    public var waitingCallers: (now: Int, peak: Int) {
-        state.withLock { ($0.waiters.count, $0.peakWaiting) }
-    }
+    public var waitingCallers: (now: Int, peak: Int) { waiters.counts }
 
     public func checkout() throws -> PostgresConnection {
-        var sawBrokenConnection = false
-        defer { if sawBrokenConnection { replacementTrigger.yield() } }
-
-        return try state.withLock { state in
-            switch state.phase {
-            case .closed:
-                throw DataSourceError.closed(datasource: name)
-            case .idle:
-                throw PostgresDataSourceError.notStarted(datasource: name)
-            case .running:
-                break
-            }
-            while let connection = state.available.popLast() {
-                guard !connection.isClosed else {
-                    state.established -= 1
-                    sawBrokenConnection = true
-                    continue
-                }
-                state.checkedOut.insert(ObjectIdentifier(connection))
-                state.totalCheckouts += 1
-                return connection
-            }
+        guard let connection = try checkoutIfAvailable() else {
             throw DataSourceError.poolExhausted(datasource: name, poolSize: poolSize)
         }
+        return connection
     }
 
     public func release(_ connection: PostgresConnection) {
@@ -454,11 +380,14 @@ public final class PostgresDataSource: DataSource, Sendable {
                 return .dropBroken
             }
             if state.openTransactions.remove(id) != nil {
+                // Held back until the rollback (and the reset that follows it)
+                // lands — see `.rollbackFirst`.
+                state.pendingReturns += 1
                 return .rollbackFirst
             }
             if resetOnRelease {
                 // Held back until the reset lands — see `.resetFirst`.
-                state.resetsInFlight += 1
+                state.pendingReturns += 1
                 return .resetFirst
             }
             state.available.append(connection)
@@ -471,52 +400,11 @@ public final class PostgresDataSource: DataSource, Sendable {
             // path that appends to `available` does this — a connection that
             // comes back with nobody told about it is a caller waiting out
             // its whole timeout beside a free connection.
-            wakeOneWaiter()
+            waiters.wakeOne()
 
         case .resetFirst:
-            // A pooled connection is a *session*, and a session remembers.
-            // `SET ROLE`, `SET search_path`, `SET app.tenant_id`, prepared
-            // statements, temporary tables, advisory-lock-adjacent state —
-            // all of it survived being returned to the pool and greeted
-            // whichever request checked the connection out next.
-            //
-            // For the row-level-security pattern this package invites, that
-            // is a cross-tenant read: request A sets a tenant, request B
-            // inherits it and sees rows it must not. `DISCARD ALL` is what
-            // PgBouncer issues between sessions for the same reason.
-            //
-            // The connection is not available until the reset succeeds. A
-            // reset that fails means a session in an unknown state, which is
-            // exactly what must not be handed to anyone.
-            let reset: EventLoopFuture<Void> = connection.query("DISCARD ALL").map { _ in }
-            reset.whenComplete { [self] result in
-                switch result {
-                case .success:
-                    let repooled = state.withLock { state -> Bool in
-                        state.resetsInFlight -= 1
-                        guard state.phase == .running else { return false }
-                        state.available.append(connection)
-                        return true
-                    }
-                    if repooled {
-                        wakeOneWaiter()
-                    } else {
-                        state.withLock { $0.established -= 1 }
-                        connection.close().whenComplete { _ in }
-                    }
-                case .failure(let error):
-                    logger.warning(
-                        "session reset failed; dropping the connection rather than reusing it",
-                        metadata: ["datasource": "\(name)", "error": "\(error)"]
-                    )
-                    state.withLock {
-                        $0.resetsInFlight -= 1
-                        $0.established -= 1
-                    }
-                    connection.close().whenComplete { _ in }
-                    replacementTrigger.yield()
-                }
-            }
+            resetAndRepool(connection)
+
         case .closePool:
             connection.close().whenComplete { _ in }
         case .dropBroken:
@@ -535,25 +423,92 @@ public final class PostgresDataSource: DataSource, Sendable {
             future.whenComplete { [self] result in
                 switch result {
                 case .success:
-                    let repooled = state.withLock { state -> Bool in
-                        guard state.phase == .running else { return false }
+                    // …and then reset it like any other release. Rolling back
+                    // undoes the *transaction*; it does not undo the session.
+                    // A scope that did `SET ROLE tenant_a` and then died
+                    // mid-transaction still has that role set after the
+                    // rollback, and repooling here — as this path used to —
+                    // handed it straight to the next scope: precisely the
+                    // cross-tenant read `DISCARD ALL` exists to prevent, on
+                    // the one path most likely to be carrying tenant state.
+                    enum Next { case reset, repooled, closed }
+                    let next = state.withLock { state -> Next in
+                        guard state.phase == .running else {
+                            state.pendingReturns -= 1
+                            state.established -= 1
+                            return .closed
+                        }
+                        if resetOnRelease { return .reset }  // keeps the pendingReturns credit
+                        state.pendingReturns -= 1
                         state.available.append(connection)
-                        return true
+                        return .repooled
                     }
-                    if repooled {
-                        wakeOneWaiter()
-                    } else {
-                        state.withLock { $0.established -= 1 }
-                        connection.close().whenComplete { _ in }
+                    switch next {
+                    case .reset: resetAndRepool(connection)
+                    case .repooled: waiters.wakeOne()
+                    case .closed: connection.close().whenComplete { _ in }
                     }
                 case .failure(let error):
                     logger.warning("rollback of leaked transaction failed; dropping connection", metadata: [
                         "datasource": "\(name)", "error": "\(error)",
                     ])
-                    state.withLock { $0.established -= 1 }
+                    state.withLock {
+                        $0.pendingReturns -= 1
+                        $0.established -= 1
+                    }
                     connection.close().whenComplete { _ in }
                     replacementTrigger.yield()
                 }
+            }
+        }
+    }
+
+    /// Issues `DISCARD ALL` and repools on success; drops the connection on
+    /// failure. The caller must already have counted this connection in
+    /// `pendingReturns` — shutdown waits on that count, and this consumes it.
+    ///
+    /// A pooled connection is a *session*, and a session remembers. `SET
+    /// ROLE`, `SET search_path`, `SET app.tenant_id`, prepared statements,
+    /// temporary tables, advisory-lock-adjacent state — all of it survived
+    /// being returned to the pool and greeted whichever request checked the
+    /// connection out next.
+    ///
+    /// For the row-level-security pattern this package invites, that is a
+    /// cross-tenant read: request A sets a tenant, request B inherits it and
+    /// sees rows it must not. `DISCARD ALL` is what PgBouncer issues between
+    /// sessions for the same reason.
+    ///
+    /// The connection is not available until the reset succeeds. A reset that
+    /// fails means a session in an unknown state, which is exactly what must
+    /// not be handed to anyone.
+    private func resetAndRepool(_ connection: PostgresConnection) {
+        let reset: EventLoopFuture<Void> = connection.query("DISCARD ALL").map { _ in }
+        reset.whenComplete { [self] result in
+            switch result {
+            case .success:
+                let repooled = state.withLock { state -> Bool in
+                    state.pendingReturns -= 1
+                    guard state.phase == .running else { return false }
+                    state.available.append(connection)
+                    return true
+                }
+                if repooled {
+                    waiters.wakeOne()
+                } else {
+                    state.withLock { $0.established -= 1 }
+                    connection.close().whenComplete { _ in }
+                }
+            case .failure(let error):
+                logger.warning(
+                    "session reset failed; dropping the connection rather than reusing it",
+                    metadata: ["datasource": "\(name)", "error": "\(error)"]
+                )
+                state.withLock {
+                    $0.pendingReturns -= 1
+                    $0.established -= 1
+                }
+                connection.close().whenComplete { _ in }
+                replacementTrigger.yield()
             }
         }
     }
@@ -562,9 +517,13 @@ public final class PostgresDataSource: DataSource, Sendable {
     /// component that `register(dataSource:)` registers alongside the pool.
     public func ping() async throws {
         do {
-            try await withConnection { connection in
-                _ = try await connection.query("SELECT 1", logger: logger)
-            }
+            // The non-waiting checkout on purpose: `withConnection` now queues
+            // for `checkoutTimeout`, and a liveness probe that queues answers
+            // "alive" five seconds late instead of answering "saturated" now.
+            // Saturation is the interesting case here, so ask directly.
+            let connection = try checkout()
+            defer { release(connection) }
+            _ = try await connection.query("SELECT 1", logger: logger)
         } catch DataSourceError.poolExhausted {
             // A full pool is not a dead database. This used to propagate,
             // so a liveness probe failed under exactly the load the service
@@ -575,6 +534,21 @@ public final class PostgresDataSource: DataSource, Sendable {
             // Every connection being checked out is positive evidence that
             // connections exist and work. Saturation belongs in a readiness
             // or capacity signal, not a liveness one.
+            //
+            // *Being checked out* is the load-bearing word, and swallowing
+            // this unconditionally is what turned that reasoning into a lie:
+            // a pool that has lost every connection to an outage is also
+            // "exhausted", with zero of them checked out and nothing working
+            // at all. Reported alive, it was the one state an orchestrator
+            // most needed to hear about.
+            guard establishedConnections > 0 else {
+                replacementTrigger.yield()  // nudge maintenance on the way out
+                logger.error(
+                    "ping found no established connections; reporting dead",
+                    metadata: ["datasource": "\(name)", "pool_size": "\(poolSize)"]
+                )
+                throw DataSourceError.poolExhausted(datasource: name, poolSize: poolSize)
+            }
             logger.debug(
                 "ping found the pool saturated; reporting alive",
                 metadata: ["datasource": "\(name)", "pool_size": "\(poolSize)"]

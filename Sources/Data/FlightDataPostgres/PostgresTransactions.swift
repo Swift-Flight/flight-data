@@ -424,15 +424,15 @@ extension Container {
 
         let source = try resolve(PostgresDataSource.self, qualifier: name)
         let connection = try await source.checkout(waitingUpTo: timeout)
-        let offer = PendingConnections.Offer(connection)
-        defer {
-            // If no scoped component ever asked, nothing leased it and the
-            // lease's deinit will never run — so this returns it.
-            if offer.take(as: PostgresConnection.self) != nil {
-                source.release(connection)
-            }
-        }
-        return try await PendingConnections.$offers.withValue([name: offer]) {
+        // `offering` merges rather than replacing, so a nested `.waiting` unit
+        // of work on a second datasource does not erase this offer for its
+        // duration — which used to send this scope's factory down the
+        // non-waiting path and fail beside its own reserved connection. It also
+        // owns the "nobody took it" return: if no scoped component ever asked,
+        // nothing leased the connection and the lease's deinit never runs.
+        return try await PendingConnections.offering(
+            name, connection: connection, returning: source.release
+        ) {
             try await bindPostgresTransactions(in: scope, datasource: name, body)
         }
     }

@@ -1,6 +1,7 @@
 import Foundation
 import FlightCore
 import FlightDataCore
+import FlightDataTesting
 import FlightDataValkey
 import Testing
 import Valkey
@@ -17,6 +18,22 @@ enum ValkeyIntegrationSuite {}
 // MARK: - Pool lifecycle
 
 extension ValkeyIntegrationSuite {
+    /// The cross-store contract, run against the real driver — see the
+    /// Postgres twin's copy of this note.
+    @Suite("DataSource conformance — ValkeyDataSource")
+    struct ValkeyConformanceTests {
+        @Test(arguments: TestServer.available)
+        func conforms(_ server: TestServer) async throws {
+            try await DataSourceConformance.verify(
+                make: {
+                    let source = try ValkeyDataSource(settings: try server.settings(poolSize: 4))
+                    try await source.start()
+                    return source
+                },
+                shutdown: { await $0.shutdown() })
+        }
+    }
+
     @Suite("Pool lifecycle (delta V1)")
     struct PoolLifecycleTests {
         @Test(arguments: TestServer.available)
@@ -50,7 +67,9 @@ extension ValkeyIntegrationSuite {
                 _ = try await connection.ping()
                 source.release(connection)
                 #expect(source.activeCheckouts == 0)
-                #expect(source.availableConnections == source.poolSize)
+                // Not instantaneous any more: release clears session state
+                // before the connection is offered to anyone else.
+                try await settle(source)
 
                 let again = try source.checkout()
                 defer { source.release(again) }
@@ -69,6 +88,7 @@ extension ValkeyIntegrationSuite {
                 }
                 source.release(first)
                 source.release(second)
+                try await settle(source)
             }
         }
 

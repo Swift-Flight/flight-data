@@ -4,6 +4,7 @@ import FlightDataPostgres
 import Foundation
 import Testing
 
+extension PostgresIntegrationSuite {
 /// A pool at capacity is a queue, not a wall.
 ///
 /// `checkout()` is synchronous — scoped components are built inside
@@ -14,6 +15,10 @@ import Testing
 ///
 /// Found by an application test that created eight issues at once against a
 /// pool of four. Four succeeded; four returned 500 immediately.
+///
+/// Nested inside `PostgresIntegrationSuite` for its `.enabled(if:)`: declared
+/// at file scope it *failed* rather than skipped without a database, which is
+/// the one thing the contributing guide asks an integration suite not to do.
 @Suite("Waiting for a connection", .serialized)
 struct PoolWaitingTests {
 
@@ -155,4 +160,5 @@ struct PoolWaitingTests {
             source.release(connection)
         }
     }
+}
 }

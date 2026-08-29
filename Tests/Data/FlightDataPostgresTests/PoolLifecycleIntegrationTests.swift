@@ -11,6 +11,26 @@ import Testing
 /// requests are served only once it is live, broken connections are
 /// replaced while it runs, and cancellation drains it.
 extension PostgresIntegrationSuite {
+/// The cross-store contract, run against the real driver.
+///
+/// `DataSourceConformance` is billed as "the contract every data source must
+/// satisfy" and was run by neither driver — which is exactly the failure mode
+/// its own doc comment says it exists to end. Both run it now.
+@Suite("DataSource conformance — PostgresDataSource")
+struct PostgresConformanceTests {
+    @Test("the driver satisfies the DataSource contract")
+    func conforms() async throws {
+        try await DataSourceConformance.verify(
+            make: {
+                let source = try PostgresDataSource(
+                    settings: try TestDatabase.settings(poolSize: 4))
+                try await source.start()
+                return source
+            },
+            shutdown: { await $0.shutdown() })
+    }
+}
+
 @Suite("Pool service lifecycle")
 struct PoolLifecycleIntegrationTests {
     @Test func moduleServiceRunsAndDrainsThePool() async throws {

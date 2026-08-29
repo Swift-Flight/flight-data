@@ -28,16 +28,51 @@ import Valkey
 /// `run()` is the module service's body: no request is served before the
 /// pool is live (Flight Core bootstrap ordering), and graceful shutdown
 /// drains it.
+///
+/// ## Convergence with the Postgres pool (design delta V2)
+///
+/// These two pools are the same machine with different dial tones, and for a
+/// while every fix landed on exactly one of them: outage-recovery backoff here
+/// but not there, tolerating a saturated pool in `ping` there but not here,
+/// session reset on release there but not here, queueing there but not here.
+/// Each gap was a real bug in whichever twin missed it. The queueing machinery
+/// now lives in core (`ConnectionWaiters`), and the remaining three landed
+/// here together: a fix to one pool ships with its twin.
 public final class ValkeyDataSource: DataSource, Sendable {
     public typealias Connection = ValkeyConnection
 
     /// The datasource's name — config key segment and registration qualifier.
     public let name: String
     /// Fixed pool size: every connection is dialed at `start()`; checkout
-    /// never grows the pool (Flight Data Core: prompt or throw).
+    /// never grows the pool — a caller past the ceiling queues rather than
+    /// growing it (core delta D2).
     public let poolSize: Int
     /// The parsed `datasource.<name>.url`.
     public let url: ValkeyDataSourceURL
+    /// How long `withConnection` queues before `poolExhausted`, from
+    /// `datasource.<name>.checkout_timeout_ms`.
+    public let checkoutTimeout: Duration
+
+    /// Whether a released connection has its session state cleared before it
+    /// is offered to the next scope.
+    ///
+    /// A Valkey connection is a *session* every bit as much as a Postgres one,
+    /// and this pool used to repool it untouched. `SELECT 5` through the raw
+    /// command hatch handed the next scope the wrong database; a leaked
+    /// `WATCH` made an unrelated `MULTI` abort for no visible reason; a
+    /// connection abandoned inside `MULTI` queued the next scope's commands
+    /// instead of running them. One pipelined round trip closes all three.
+    ///
+    /// On by default, and only worth turning off for a deployment certain that
+    /// nothing it runs touches session state. The saving is one round trip per
+    /// scope; the cost of being wrong is a scope reading the wrong database.
+    ///
+    /// Deliberately not the server's own `RESET`: that also deauthenticates
+    /// the connection, so on any password-protected server the next command
+    /// would fail `NOAUTH`. Subscriptions entered through the raw hatch are
+    /// likewise out of scope — that hatch is explicitly outside the
+    /// compatibility guarantee.
+    public let resetOnRelease: Bool
 
     private let logger: Logger
     private let connectionConfiguration: ValkeyConnectionConfiguration
@@ -69,11 +104,26 @@ public final class ValkeyDataSource: DataSource, Sendable {
         var established = 0
         var totalCheckouts = 0
         var totalRetired = 0
+        /// Connections released but not yet back in `available` — checked out
+        /// by nobody and available to nobody until their session reset lands.
+        /// Shutdown waits on this being empty, or it retires a connection out
+        /// from under an in-flight reset.
+        var resetting: Set<ObjectIdentifier> = []
     }
 
-    public init(settings: DataSourceSettings, logger: Logger? = nil) throws {
+    /// Callers parked in `checkout(waitingUpTo:)`. Core's, not this pool's —
+    /// the Postgres pool parks callers in exactly the same one.
+    private let waiters = ConnectionWaiters()
+
+    public init(
+        settings: DataSourceSettings,
+        resetOnRelease: Bool = true,
+        logger: Logger? = nil
+    ) throws {
         self.name = settings.name
         self.poolSize = settings.poolSize
+        self.checkoutTimeout = settings.checkoutTimeout
+        self.resetOnRelease = resetOnRelease
         // Parsed here — at freeze()'s eager singleton construction — so a
         // malformed URL fails bootstrap, not the first command (Flight
         // Data Core posture). TLS context construction likewise.
@@ -134,8 +184,13 @@ public final class ValkeyDataSource: DataSource, Sendable {
     /// pooled connections are retired now (their lenders return and the
     /// driver closes them), in-flight ones as they come back.
     public func shutdown() async {
+        // Close the door first, then wait for connections still being reset:
+        // one of those is in neither `available` nor `checkedOut`, so retiring
+        // the free list without waiting would leave its lender parked forever.
+        state.withLock { $0.phase = .closed }
+        await drainPendingReturns()
+
         let toResume = state.withLock { state -> [CheckedContinuation<Void, Never>] in
-            state.phase = .closed
             let connections = state.available
             state.available = []
             return connections.compactMap { retireLocked(&state, ObjectIdentifier($0)) }
@@ -145,6 +200,24 @@ public final class ValkeyDataSource: DataSource, Sendable {
             continuation.resume()
         }
         logger.info("valkey pool closed", metadata: ["datasource": "\(name)"])
+    }
+
+    /// Waits for outstanding session resets to finish, so shutdown does not
+    /// race the task that repools or retires their connections.
+    private func drainPendingReturns() async {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while !state.withLock({ $0.resetting.isEmpty }) {
+            guard ContinuousClock.now < deadline else {
+                logger.warning(
+                    "gave up waiting for session resets during shutdown",
+                    metadata: [
+                        "datasource": "\(name)",
+                        "outstanding": "\(state.withLock { $0.resetting.count })",
+                    ])
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
     }
 
     // MARK: - The lender (delta V1)
@@ -192,12 +265,14 @@ public final class ValkeyDataSource: DataSource, Sendable {
     }
 
     private func adopt(_ connection: ValkeyConnection) -> Bool {
-        state.withLock { state in
+        let adopted = state.withLock { state in
             guard state.phase == .running else { return false }
             state.available.append(connection)
             state.established += 1
             return true
         }
+        if adopted { waiters.wakeOne() }
+        return adopted
     }
 
     private func parkUntilRetired(_ id: ObjectIdentifier) async {
@@ -313,6 +388,28 @@ public final class ValkeyDataSource: DataSource, Sendable {
     // MARK: - DataSource
 
     public func checkout() throws -> ValkeyConnection {
+        guard let connection = try checkoutIfAvailable() else {
+            throw DataSourceError.poolExhausted(datasource: name, poolSize: poolSize)
+        }
+        return connection
+    }
+
+    /// Checks a connection out, waiting up to `timeout` for one to come back.
+    ///
+    /// The seam's async primitive (core delta D2), overriding the polling
+    /// default with this pool's native handoff: a release wakes the
+    /// longest-parked caller directly rather than being noticed on a poll.
+    public func checkout(waitingUpTo timeout: Duration) async throws -> ValkeyConnection {
+        try await waiters.checkout(
+            waitingUpTo: timeout,
+            attempt: checkoutIfAvailable,
+            exhausted: { DataSourceError.poolExhausted(datasource: name, poolSize: poolSize) })
+    }
+
+    /// `checkout()`'s body, with "nothing free" as a value rather than an
+    /// error — the distinction the waiting form needs and the throwing one
+    /// does not.
+    private func checkoutIfAvailable() throws -> ValkeyConnection? {
         try state.withLock { state in
             switch state.phase {
             case .closed:
@@ -322,9 +419,7 @@ public final class ValkeyDataSource: DataSource, Sendable {
             case .running:
                 break
             }
-            guard let connection = state.available.popLast() else {
-                throw DataSourceError.poolExhausted(datasource: name, poolSize: poolSize)
-            }
+            guard let connection = state.available.popLast() else { return nil }
             state.checkedOut.insert(ObjectIdentifier(connection))
             state.totalCheckouts += 1
             return connection
@@ -332,37 +427,137 @@ public final class ValkeyDataSource: DataSource, Sendable {
     }
 
     public func release(_ connection: ValkeyConnection) {
+        enum Disposition {
+            case retire(CheckedContinuation<Void, Never>?, replace: Bool)
+            case repool
+            case resetFirst
+        }
+
         let id = ObjectIdentifier(connection)
-        let (continuation, needsReplacement) = state.withLock {
-            state -> (CheckedContinuation<Void, Never>?, Bool) in
+        let disposition = state.withLock { state -> Disposition in
             precondition(
                 state.checkedOut.remove(id) != nil,
                 "release of a connection that is not checked out from datasource '\(name)' — double release, or a foreign connection"
             )
             if state.phase == .closed {
                 state.broken.remove(id)
-                return (retireLocked(&state, id), false)
+                return .retire(retireLocked(&state, id), replace: false)
             }
             if state.broken.remove(id) != nil {
-                return (retireLocked(&state, id), true)
+                return .retire(retireLocked(&state, id), replace: true)
+            }
+            if resetOnRelease {
+                // Held back until the reset lands — see `resetAndRepool`.
+                state.resetting.insert(id)
+                return .resetFirst
+            }
+            state.available.append(connection)
+            return .repool
+        }
+
+        switch disposition {
+        case .retire(let continuation, let replace):
+            continuation?.resume()
+            if replace { replacementTrigger.yield() }
+        case .repool:
+            // Back in the pool, so whoever is parked can stop waiting. Every
+            // path that appends to `available` does this — a connection that
+            // comes back with nobody told about it is a caller waiting out its
+            // whole timeout beside a free connection.
+            waiters.wakeOne()
+        case .resetFirst:
+            // Release is synchronous and non-throwing by contract, so the
+            // round trip runs off it. The connection is not in `available`
+            // until the reset lands: a session in an unknown state is exactly
+            // what must not be handed to anyone.
+            Task { await resetAndRepool(connection) }
+        }
+    }
+
+    /// Clears session state and repools, or retires the connection if the
+    /// reset did not land. The caller must already have put `connection` in
+    /// `resetting` — shutdown waits on that, and this clears it.
+    private func resetAndRepool(_ connection: ValkeyConnection) async {
+        let id = ObjectIdentifier(connection)
+
+        // One pipelined round trip, in this order for a reason: a connection
+        // abandoned inside `MULTI` *queues* whatever it is sent next, so
+        // `DISCARD` has to go first or the reset itself would be queued rather
+        // than run. `DISCARD` then fails with "without MULTI" in the common
+        // case, which is why individual failures are tolerated and only the
+        // trailing `SELECT` — the one that has to have taken effect — decides
+        // whether the connection is reusable.
+        let commands: [any ValkeyCommand] = [
+            ValkeyRawCommand("DISCARD", arguments: []),
+            ValkeyRawCommand("UNWATCH", arguments: []),
+            ValkeyRawCommand("SELECT", arguments: ["\(url.database)"]),
+        ]
+        let results = await connection.execute(commands)
+        var failure: (any Error)?
+        if case .failure(let error) = results.last { failure = error }
+
+        let disposition = state.withLock { state -> (CheckedContinuation<Void, Never>?, Bool) in
+            state.resetting.remove(id)
+            guard state.phase == .running, failure == nil else {
+                return (retireLocked(&state, id), state.phase == .running)
             }
             state.available.append(connection)
             return (nil, false)
         }
-        continuation?.resume()
-        if needsReplacement {
-            replacementTrigger.yield()
+
+        if let failure {
+            logger.warning(
+                "session reset failed; dropping the connection rather than reusing it",
+                metadata: ["datasource": "\(name)", "error": "\(failure)"])
         }
+        if let continuation = disposition.0 {
+            continuation.resume()
+        } else {
+            waiters.wakeOne()
+        }
+        if disposition.1 { replacementTrigger.yield() }
     }
 
     /// `PING`, surfaced by Actuator through the `DataSourceLiveness`
     /// component that `register(dataSource:)` registers alongside the pool
     ///.
     public func ping() async throws {
-        try await withConnection { connection in
+        do {
+            // The non-waiting checkout on purpose: `withConnection` queues for
+            // `checkoutTimeout`, and a liveness probe that queues answers
+            // "alive" five seconds late instead of answering now.
+            let connection = try checkout()
+            defer { release(connection) }
             _ = try await connection.ping()
+        } catch DataSourceError.poolExhausted {
+            // A full pool is not a dead server. Propagating this — as this
+            // driver used to, while its Postgres twin had already stopped —
+            // failed a liveness probe under exactly the load the service was
+            // handling successfully, and an orchestrator restarted a pod whose
+            // only problem was being busy.
+            //
+            // *Being checked out* is the load-bearing part: connections that
+            // are all busy are positive evidence connections exist and work. A
+            // pool that has lost every connection to an outage is "exhausted"
+            // too, with none of them checked out and nothing working at all,
+            // and that one has to be reported.
+            guard establishedConnections > 0 else {
+                replacementTrigger.yield()  // nudge maintenance on the way out
+                logger.error(
+                    "ping found no established connections; reporting dead",
+                    metadata: ["datasource": "\(name)", "pool_size": "\(poolSize)"])
+                throw DataSourceError.poolExhausted(datasource: name, poolSize: poolSize)
+            }
+            logger.debug(
+                "ping found the pool saturated; reporting alive",
+                metadata: ["datasource": "\(name)", "pool_size": "\(poolSize)"])
         }
     }
+
+    /// How many callers are parked waiting for a connection right now, and
+    /// the most there have ever been. A pool that is too small says so here
+    /// before it says so as errors.
+    public var waitingCallers: (now: Int, peak: Int) { waiters.counts }
 
     // MARK: - Introspection (tests, Actuator)
 

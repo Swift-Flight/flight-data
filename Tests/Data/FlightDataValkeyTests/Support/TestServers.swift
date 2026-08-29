@@ -73,10 +73,12 @@ enum TestServer: String, CaseIterable, Sendable, CustomStringConvertible {
 
     func settings(
         datasource name: String = PrimaryDataSource.name,
-        poolSize: Int = 4
+        poolSize: Int = 4,
+        checkoutTimeout: Duration = DataSourceSettings.defaultCheckoutTimeout
     ) throws -> DataSourceSettings {
         guard let url else { throw TestServerError.notConfigured(self) }
-        return try DataSourceSettings(name: name, url: url, poolSize: poolSize)
+        return try DataSourceSettings(
+            name: name, url: url, poolSize: poolSize, checkoutTimeout: checkoutTimeout)
     }
 }
 
@@ -117,6 +119,18 @@ func withValkeyContainer<T>(
 func flush(_ source: ValkeyDataSource) async throws {
     try await source.withConnection { connection in
         try await connection.flushdb()
+    }
+    // Releasing a connection starts its session reset, and it is not back in
+    // the free list until that lands. A test that asserts pool counts right
+    // after this would otherwise be racing the reset.
+    try await settle(source)
+}
+
+/// Waits for every connection to be back in the free list — after a release,
+/// or after a replacement dial.
+func settle(_ source: ValkeyDataSource) async throws {
+    try await waitUntil("every connection back in the pool") {
+        source.availableConnections == source.poolSize
     }
 }
 

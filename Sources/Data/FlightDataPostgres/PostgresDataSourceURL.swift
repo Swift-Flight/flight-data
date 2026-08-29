@@ -108,8 +108,14 @@ public struct PostgresDataSourceURL: Sendable, Equatable {
         return PostgresDataSourceURL(
             host: host,
             port: components.port ?? 5432,
-            username: components.user?.removingPercentEncoding ?? "postgres",
-            password: components.password?.removingPercentEncoding,
+            // `URLComponents.user`/`.password` are already percent-decoded —
+            // `percentEncodedUser` is the raw spelling. Decoding again turned
+            // a password that legitimately *contains* a percent escape into a
+            // different password: `pa%41ss` (written `pa%2541ss` in the URL)
+            // silently became `paAss`, and the resulting failure blamed the
+            // server. The Valkey parser never had this; this is its reading.
+            username: components.user ?? "postgres",
+            password: components.password,
             database: database,
             sslMode: sslMode
         )
