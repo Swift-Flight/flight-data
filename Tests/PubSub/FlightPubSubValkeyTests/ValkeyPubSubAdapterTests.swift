@@ -49,6 +49,35 @@ struct ValkeyPubSubAdapterTests {
         return condition()
     }
 
+    /// Publishes until `condition` holds, or gives up.
+    ///
+    /// Valkey pub/sub is at-most-once, so a message published before the
+    /// subscriber's `SUBSCRIBE` has landed is legitimately lost — which is why
+    /// these tests used to sleep a few hundred milliseconds first and hope the
+    /// subscription had established. A sleep long enough to be reliable is a
+    /// sleep every run pays, and one short enough to be quick is a test that
+    /// fails on a loaded machine for reasons that have nothing to do with the
+    /// code. Republishing needs no guess: the transport's own semantics say a
+    /// dropped message is a retry's problem.
+    @discardableResult
+    private func publishUntil(
+        _ adapter: ValkeyPubSubAdapter,
+        _ message: Message,
+        timeout: Duration = .seconds(5),
+        until condition: @Sendable () -> Bool
+    ) async throws -> Bool {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if condition() { return true }
+            try await adapter.broadcast(message)
+            for _ in 0..<5 {
+                if condition() { return true }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        return condition()
+    }
+
     @Test("a message published on one node arrives on another")
     func crossesBetweenNodes() async throws {
         let channel = "flight-test-\(UUID().uuidString)"
@@ -62,18 +91,12 @@ struct ValkeyPubSubAdapterTests {
                 }
                 defer { consumer.cancel() }
 
-                // Let the subscription establish before publishing: Valkey
-                // pub/sub is at-most-once, so a message sent before SUBSCRIBE
-                // lands is legitimately lost rather than delayed.
-                _ = await eventually { true }
-                try await Task.sleep(for: .milliseconds(300))
-
-                try await publisher.broadcast(
+                let arrived = try await publishUntil(
+                    publisher,
                     Message(
                         topic: "room:42", payload: Data("hello".utf8),
-                        metadata: ["origin": "node-a"]))
-
-                let arrived = await eventually { received.withLock { !$0.isEmpty } }
+                        metadata: ["origin": "node-a"])
+                ) { received.withLock { !$0.isEmpty } }
                 #expect(arrived, "nothing crossed between nodes")
 
                 let message = try #require(received.withLock { $0.first })
@@ -100,11 +123,11 @@ struct ValkeyPubSubAdapterTests {
                     }
                 }
                 defer { consumer.cancel() }
-                try await Task.sleep(for: .milliseconds(300))
 
-                try await publisher.broadcast(Message(topic: "bin", payload: payload))
-
-                _ = await eventually { received.withLock { !$0.isEmpty } }
+                let arrived = try await publishUntil(
+                    publisher, Message(topic: "bin", payload: payload)
+                ) { received.withLock { !$0.isEmpty } }
+                #expect(arrived, "nothing crossed between nodes")
                 #expect(received.withLock { $0.first?.payload } == payload)
             }
         }
@@ -125,12 +148,16 @@ struct ValkeyPubSubAdapterTests {
                     }
                 }
                 defer { consumer.cancel() }
-                try await Task.sleep(for: .milliseconds(300))
 
-                try await publisher.broadcast(Message(topic: "t", payload: Data("x".utf8)))
-                try await Task.sleep(for: .milliseconds(400))
-
-                #expect(received.withLock { $0.isEmpty }, "traffic leaked across channels")
+                // A negative assertion cannot be waited *for*, so this one
+                // publishes repeatedly across a window that comfortably covers
+                // a delivery — if the channels leaked, several of these would
+                // land rather than none.
+                let leaked = try await publishUntil(
+                    publisher, Message(topic: "t", payload: Data("x".utf8)),
+                    timeout: .seconds(1)
+                ) { received.withLock { !$0.isEmpty } }
+                #expect(!leaked, "traffic leaked across channels")
             }
         }
     }
@@ -149,7 +176,14 @@ struct ValkeyPubSubAdapterTests {
                     }
                 }
                 defer { consumer.cancel() }
-                try await Task.sleep(for: .milliseconds(300))
+
+                // A first message that actually lands, so the assertion below
+                // distinguishes "the bad frame killed the stream" from "the
+                // subscription had not established yet".
+                let established = try await publishUntil(
+                    publisher, Message(topic: "before", payload: Data())
+                ) { received.withLock { $0.contains { $0.topic == "before" } } }
+                #expect(established, "the subscription never established")
 
                 // The bad frame goes out on the *publisher's* connection
                 // rather than a second client. A client whose run() is
@@ -159,12 +193,9 @@ struct ValkeyPubSubAdapterTests {
                 // this test is about.
                 try await publisher.publishRaw(Data("not json".utf8))
 
-                try await Task.sleep(for: .milliseconds(200))
-                try await publisher.broadcast(Message(topic: "after", payload: Data()))
-
-                let arrived = await eventually {
-                    received.withLock { $0.contains { $0.topic == "after" } }
-                }
+                let arrived = try await publishUntil(
+                    publisher, Message(topic: "after", payload: Data())
+                ) { received.withLock { $0.contains { $0.topic == "after" } } }
                 #expect(arrived, "the stream died on an undecodable message")
             }
         }

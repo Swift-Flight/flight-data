@@ -138,9 +138,12 @@ public final class ValkeyCache: Cache, Sendable {
                 let reply = try await client.scan(
                     cursor: cursor, pattern: pattern, count: Self.scanBatchSize)
                 cursor = reply.cursor
-                let keys = try reply.keys.decode(as: [String].self)
+                // Decoded straight to `ValkeyKey` rather than to `[String]`
+                // and re-wrapped one at a time — the round trip through String
+                // bought nothing but an allocation per key.
+                let keys = try reply.keys.decode(as: [ValkeyKey].self)
                 if !keys.isEmpty {
-                    _ = try await client.unlink(keys: keys.map { ValkeyKey($0) })
+                    _ = try await client.unlink(keys: keys)
                 }
             } while cursor != 0
             breaker.recordSuccess()

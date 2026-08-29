@@ -281,12 +281,19 @@ was edited:
 error: migration 20260714120000_CreateUsers has been modified since it was applied
 (checksum mismatch). Applied migrations are immutable — create a new migration to make
 further changes.
+  recorded checksum: 3f9a…
+  current checksum:  b1c7…
+If the edit is confirmed-safe (formatting or comments only), run 'flight-migrate repair'
+to re-baseline the recorded checksum.
 ```
+
+The message is pinned verbatim by a test, which is the only way a quoted error in a
+document like this one stays true.
 
 Because the hash covers source text, a purely cosmetic edit (formatting, comments) also
 trips it — deliberately erring toward halting and asking. After a confirmed-safe edit,
-`migrate repair` re-baselines the recorded checksums. Rollbacks verify checksums too: a
-drifted `down` no longer matches what was applied.
+`flight-migrate repair` re-baselines the recorded checksums. Rollbacks verify checksums
+too: a drifted `down` no longer matches what was applied.
 
 **Concurrency.** The whole run holds `pg_advisory_lock` on a constant key (the ASCII
 bytes `"FLIGHTMG"`; configurable). N instances starting at once serialize; latecomers

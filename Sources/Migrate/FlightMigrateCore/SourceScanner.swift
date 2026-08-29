@@ -158,6 +158,16 @@ public enum SourceScanner {
             }
 
             // Raw string delimiters: count leading '#'s before a quote.
+            //
+            // Known blind spot: string *interpolation* is not parsed, so a
+            // `"\(a ? "x" : "y")"` — a quote inside an interpolation inside a
+            // string — ends the scan at the wrong quote and the rest of the
+            // line is misread. Deliberately left, because it fails in the safe
+            // direction: the generator sees a malformed declaration and the
+            // build stops with an error naming the file, rather than silently
+            // skipping a migration. A migration whose *name or version* is
+            // built by interpolation would be a much bigger problem than the
+            // scanner not understanding it.
             if c == "#" || c == "\"" {
                 var hashCount = 0
                 var j = i

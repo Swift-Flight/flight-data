@@ -379,4 +379,45 @@ struct MigratorMigrateTests {
         #expect(sawWill)
         #expect(sawDid)
     }
+
+    // MARK: - The lock
+
+    @Test func configuredLockTimeoutReachesTheDatabase() async throws {
+        // The fake used to ignore `timeout` entirely, so nothing checked that
+        // the configured value got as far as the acquisition — and the CLI
+        // was separately pinning every run to the default with no flag to
+        // change it.
+        let db = FakeDatabase()
+        let migrator = makeMigrator(
+            database: db, migrations: [entry(1, "CreateAlpha", CreateAlpha.self)],
+            lockTimeout: .seconds(7))
+        _ = try await migrator.migrate()
+        #expect(await db.requestedLockTimeouts == [.seconds(7)])
+    }
+
+    @Test func anIndefiniteLockTimeoutIsPassedThroughAsNil() async throws {
+        // `nil` is "let Postgres queue us", which the setting's own doc
+        // comment calls the right choice for an interactive run.
+        let db = FakeDatabase()
+        let migrator = makeMigrator(
+            database: db, migrations: [entry(1, "CreateAlpha", CreateAlpha.self)],
+            lockTimeout: nil)
+        _ = try await migrator.migrate()
+        #expect(await db.requestedLockTimeouts == [Duration?.none])
+    }
+
+    @Test func aContendedLockFailsWithoutTouchingTheLedger() async throws {
+        // The other half: when the lock cannot be had, the run must stop
+        // before it changes anything, and must not release a lock it never
+        // held.
+        let db = FakeDatabase()
+        await db.setLockIsHeldByAnotherRun(true)
+        let migrator = makeMigrator(
+            database: db, migrations: [entry(1, "CreateAlpha", CreateAlpha.self)],
+            lockTimeout: .milliseconds(50))
+
+        await #expect(throws: MigrationError.self) { _ = try await migrator.migrate() }
+        #expect(await db.transcript.isEmpty, "a run that never got the lock must change nothing")
+        #expect(await db.appliedVersions().isEmpty)
+    }
 }

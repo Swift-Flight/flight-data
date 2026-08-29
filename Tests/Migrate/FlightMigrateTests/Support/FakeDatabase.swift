@@ -103,7 +103,21 @@ actor FakeDatabase: MigrationDatabase, MigrationSession {
         stagedRows = nil
     }
 
+    /// Set to make every acquisition fail as if another run held the lock —
+    /// the path a real database reaches only under contention, and the one
+    /// nothing exercised because this fake ignored `timeout` entirely.
+    private var lockIsHeldByAnotherRun = false
+
+    func setLockIsHeldByAnotherRun(_ held: Bool) { lockIsHeldByAnotherRun = held }
+    /// The timeout each acquisition was asked for, so a test can assert the
+    /// configured one actually reaches the database.
+    private(set) var requestedLockTimeouts: [Duration?] = []
+
     func acquireAdvisoryLock(key: Int64, timeout: Duration?) async throws {
+        requestedLockTimeouts.append(timeout)
+        if lockIsHeldByAnotherRun {
+            throw MigrationError.lockTimeout(key: key, waited: timeout ?? .zero)
+        }
         try record(.acquireLock(key))
         guard heldLocks.insert(key).inserted else {
             throw StateError(description: "advisory lock \(key) acquired twice on one session")

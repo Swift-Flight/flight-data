@@ -52,7 +52,9 @@ struct ClusteredDeliveryTests {
 
         let relayA = Task { try await PubSubRelayService(clustered: nodeA).run() }
         let relayB = Task { try await PubSubRelayService(clustered: nodeB).run() }
-        try await Task.sleep(for: .milliseconds(400))
+        // The relays need a moment to start draining; each test republishes
+        // until delivery, so this only has to get the tasks scheduled.
+        try await Task.sleep(for: .milliseconds(50))
 
         let result = try await body(nodeA, nodeB)
 
@@ -75,14 +77,40 @@ struct ClusteredDeliveryTests {
                 }
             }
             defer { consumer.cancel() }
-            try await Task.sleep(for: .milliseconds(200))
 
-            try await nodeA.publish(Message(topic: "room:42", payload: Data("hi".utf8)))
-
-            let arrived = await eventually { received.withLock { !$0.isEmpty } }
+            // Republished until it lands rather than sleeping first and hoping
+            // the subscription had established: Valkey pub/sub is at-most-once,
+            // so a message published too early is legitimately lost — which
+            // makes a retry the transport's own answer, and a fixed sleep a
+            // guess that gets slower or flakier depending on which way you
+            // tune it.
+            let arrived = try await publishUntil(
+                nodeA, Message(topic: "room:42", payload: Data("hi".utf8))
+            ) { received.withLock { !$0.isEmpty } }
             #expect(arrived, "the message never crossed to the other node")
             #expect(received.withLock { $0.first } == Data("hi".utf8))
         }
+    }
+
+    /// Publishes until `condition` holds, or gives up. See `crossNodeDelivery`
+    /// for why an at-most-once transport wants this rather than a sleep.
+    @discardableResult
+    private func publishUntil(
+        _ node: ClusteredPubSub,
+        _ message: Message,
+        timeout: Duration = .seconds(5),
+        until condition: @Sendable () -> Bool
+    ) async throws -> Bool {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if condition() { return true }
+            try await node.publish(message)
+            for _ in 0..<5 {
+                if condition() { return true }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        return condition()
     }
 
     @Test("a publisher's own subscribers get it exactly once, not twice")

@@ -118,10 +118,12 @@ func makeMigrator(
     database: FakeDatabase,
     migrations: [MigrationEntry],
     failOnUnknownApplied: Bool = false,
+    lockTimeout: Duration? = FlightMigrator.Configuration().lockTimeout,
     onEvent: (@Sendable (MigrationEvent) -> Void)? = nil
 ) -> FlightMigrator {
     var configuration = FlightMigrator.Configuration()
     configuration.failOnUnknownApplied = failOnUnknownApplied
+    configuration.lockTimeout = lockTimeout
     configuration.onEvent = onEvent
     return FlightMigrator(database: database, migrations: migrations, configuration: configuration)
 }

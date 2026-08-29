@@ -68,7 +68,10 @@ public struct ValkeyPubSubAdapter: DistributedPubSubAdapter {
     ///     they surface.
     public init(
         client: ValkeyClient,
-        channel: String = "flight-pubsub",
+        // One definition of the default, in the settings type. It used to be
+        // spelled out here as well, and a desync between two literals makes
+        // two nodes silently deaf to each other.
+        channel: String = ValkeyPubSubSettings.defaultChannel,
         retryDelay: Duration = .seconds(1),
         logger: Logger = Logger(label: "flight.pubsub.valkey")
     ) {

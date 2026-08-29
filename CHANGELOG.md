@@ -171,6 +171,18 @@ the thing that kept manufacturing them.
   external label", but matching is by internal name — so following the advice
   produced a second error. It says to name the parameter.
 
+- The PubSub integration tests republish until delivery instead of sleeping a
+  few hundred milliseconds and hoping the subscription had established. For an
+  at-most-once transport a retry is the semantics, not a workaround, and a
+  sleep long enough to be reliable is one every run pays. The suite is faster
+  and no longer has a tuning knob between slow and flaky. The channel default
+  is defined once rather than in two places, where a desync makes two nodes
+  silently deaf to each other.
+
+- `FakeDatabase` honours `lockTimeout`, so the contended-lock path has tests: a
+  configured timeout reaches the acquisition, `nil` passes through as "wait
+  indefinitely", and a run that cannot get the lock changes nothing.
+
 ## [0.3.0] - 2026-08-25
 
 ### Added
