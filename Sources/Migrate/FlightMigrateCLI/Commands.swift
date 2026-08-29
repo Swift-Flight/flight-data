@@ -2,6 +2,14 @@ import ArgumentParser
 import FlightMigrate
 import Foundation
 
+/// Reported by `--version`.
+///
+/// Hand-maintained, and it has to be: a build-tool plugin cannot see the tag,
+/// and reading the package manifest at runtime is not a thing a compiled
+/// binary can do. It sat at "0.1.0" through two releases, so it is pinned by a
+/// test that reads the changelog's most recent version.
+let flightMigrateVersion = "0.4.0"
+
 /// Options shared by every command that connects to the database.
 struct DatabaseOptions: ParsableArguments {
     @Option(
@@ -17,6 +25,27 @@ struct DatabaseOptions: ParsableArguments {
         help: "Bookkeeping table name (may be schema-qualified).")
     var migrationsTable: String = "flight_migrations"
 
+    @Option(
+        name: .customLong("lock-timeout"),
+        help: """
+            Seconds to wait for the migration advisory lock before giving up;             0 waits indefinitely. Defaults to 30. An interactive run you are             watching is the case `0` is for — the doc comment on the setting has             said so since it was added, while the CLI offered no way to ask for it.
+            """)
+    var lockTimeout: Int = 30
+
+    @Option(
+        name: .customLong("advisory-lock-key"),
+        help: """
+            The advisory lock key held for the duration of a mutating run.             Change it only if it collides with a lock scheme the application             already uses.
+            """)
+    var advisoryLockKey: Int64?
+
+    @Flag(
+        name: .customLong("fail-on-unknown-applied"),
+        help: """
+            Treat applied versions this binary does not know about as an error.             Off by default: an older binary seeing a newer schema is normal             mid-deploy. On, it catches a deleted migration file.
+            """)
+    var failOnUnknownApplied = false
+
     @Flag(name: .shortAndLong, help: "Log SQL statements and connection details.")
     var verbose = false
 }
@@ -31,7 +60,7 @@ struct RootCommand: AsyncParsableCommand {
             rolls back cleanly (Postgres transactional DDL). Concurrent runs are serialized \
             by a Postgres advisory lock.
             """,
-        version: "0.1.0",
+        version: flightMigrateVersion,
         subcommands: [
             ApplyCommand.self, StatusCommand.self, RollbackCommand.self, CreateCommand.self,
             RepairCommand.self,

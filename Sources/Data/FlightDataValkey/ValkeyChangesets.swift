@@ -23,10 +23,19 @@ extension ValkeyClientProtocol {
     /// (which must therefore include every primary-key column).
     ///
     /// Changed fields become `HSET` pairs; fields changed *to nil* become an
-    /// `HDEL` (hash fields have no NULL). When both are needed they go in
-    /// one `MULTI`/`EXEC` batch, so no other client observes the write
-    /// half-applied. Empty `changedFields` is a no-op — dirty tracking
-    /// already proved there is no write to make.
+    /// `HDEL` (hash fields have no NULL). When both are needed they go in one
+    /// `MULTI`/`EXEC` batch, so no other client's commands interleave with
+    /// them.
+    ///
+    /// That is *not* all-or-nothing, and this comment used to say it was.
+    /// `MULTI` guarantees no interleaving; it does not roll back. A command
+    /// that fails inside the batch leaves the ones before it applied, which is
+    /// why `commandFailed` says the write "did not fully land" rather than
+    /// claiming it was undone — the thrown error was honest while the comment
+    /// above it was not.
+    ///
+    /// Empty `changedFields` is a no-op — dirty tracking already proved there
+    /// is no write to make.
     ///
     /// Unlike SQL, `HSET` cannot distinguish insert from update — both are
     /// "set these fields". The insert/update distinction only picks where
@@ -135,16 +144,28 @@ public enum ValkeyChangesetTranslation {
     }
 
     /// `<tableName>:<pk>[:<pk>…]`, pk values in the model's declared
-    /// primary-key column order. Update changesets carry identity; insert
-    /// changesets must have changed every primary-key column.
+    /// primary-key column order, each escaped. Update changesets carry
+    /// identity; insert changesets must have changed every primary-key column.
+    ///
+    /// The escaping is what stops two different rows sharing a key. `:` is the
+    /// separator *and* an ordinary character in a String primary key, so
+    /// unescaped, a single-column model with id `"a:b"` and a two-column model
+    /// with ids `"a"`/`"b"` produced the same key — and one row's writes landed
+    /// on the other's hash. Same rule as `CacheKey`: `\` doubles, `:` becomes
+    /// `\:`, so a segment can never contain a raw separator.
     private static func deriveKey<M: TableModel>(
         _ changes: ValidatedChanges, for model: M.Type
     ) throws -> String {
         let primaryKey = M.primaryKey
-        precondition(!primaryKey.isEmpty, """
-        \(M.self) has no primary-key column, so a hash key cannot be derived. \
-        Flag identity columns with TableColumn(_, _, primaryKey: true), or pass an explicit key.
-        """)
+        // A throw rather than a trap. Missing a primary-key *field* already
+        // throws; a model with no primary-key column at all is the same class
+        // of misuse — a mistake in the caller's model definition — and having
+        // one crash the process while the other returns an error meant the same
+        // mistake had two failure postures depending on which half you got
+        // wrong.
+        guard !primaryKey.isEmpty else {
+            throw ValkeyChangesetError.noPrimaryKey(model: String(describing: M.self))
+        }
         let identity = changes.identity ?? changes.changedFields
         let segments = try primaryKey.map { column -> String in
             guard let boxed = identity[column.name],
@@ -155,7 +176,23 @@ public enum ValkeyChangesetTranslation {
             }
             return value.keySegment
         }
-        return ([M.tableName] + segments).joined(separator: ":")
+        return ([M.tableName] + segments).map(escapeKeySegment).joined(separator: ":")
+    }
+
+    /// `\` → `\\`, `:` → `\:`. Injective, so distinct segment lists render to
+    /// distinct keys.
+    private static func escapeKeySegment(_ segment: String) -> String {
+        guard segment.contains(where: { $0 == "\\" || $0 == ":" }) else { return segment }
+        var escaped = ""
+        escaped.reserveCapacity(segment.count + 8)
+        for character in segment {
+            switch character {
+            case "\\": escaped += "\\\\"
+            case ":": escaped += "\\:"
+            default: escaped.append(character)
+            }
+        }
+        return escaped
     }
 }
 
@@ -247,6 +284,11 @@ public enum ValkeyChangesetError: Error, Sendable, Equatable, CustomStringConver
     /// An insert changeset (no identity) did not change some primary-key
     /// column, so no hash key can be derived.
     case missingKeyField(model: String, column: String)
+    /// The model declares no primary-key column at all, so there is nothing to
+    /// derive a hash key from. Used to be a `precondition`, which made the same
+    /// class of model-definition mistake crash on one path and throw on the
+    /// other.
+    case noPrimaryKey(model: String)
     /// One command inside a transaction failed. The transaction as a whole
     /// was accepted by the server; this command within it was not, so the
     /// write did not fully land.
@@ -258,6 +300,8 @@ public enum ValkeyChangesetError: Error, Sendable, Equatable, CustomStringConver
             return "Changeset field '\(field)' has type \(type), which the Valkey driver cannot render. Store it as one of the supported column types (String, integers, Double, Bool, UUID, Date, Decimal, Data)."
         case .missingKeyField(let model, let column):
             return "Cannot derive a hash key for \(model): primary-key column '\(column)' is neither in the changeset's identity nor among its changed fields. Set it in the changeset, or pass an explicit key to apply(_:to:key:)."
+        case .noPrimaryKey(let model):
+            return "Cannot derive a hash key for \(model): it declares no primary-key column. Flag its identity columns with TableColumn(_, _, primaryKey: true), or pass an explicit key to apply(_:to:key:)."
         case .commandFailed(let key, let index, let reason):
             return "Writing changes to '\(key)' failed: command \(index) in the transaction reported \(reason). The write did not fully land."
         }

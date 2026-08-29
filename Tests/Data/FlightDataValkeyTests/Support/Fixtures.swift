@@ -24,6 +24,30 @@ struct Session: TableModel, Equatable {
     ]
 }
 
+/// A two-column primary key, for the key-encoding collision tests.
+struct TwoPartKeySession: TableModel, Equatable {
+    var left: String
+    var right: String
+
+    static let tableName = "two_part"
+
+    static let columns: [TableColumn<TwoPartKeySession>] = [
+        TableColumn("left", \TwoPartKeySession.left, primaryKey: true),
+        TableColumn("right", \TwoPartKeySession.right, primaryKey: true),
+    ]
+}
+
+/// No primary-key column at all — the misuse that used to trap.
+struct KeylessSession: TableModel, Equatable {
+    var value: String
+
+    static let tableName = "keyless"
+
+    static let columns: [TableColumn<KeylessSession>] = [
+        TableColumn("value", \KeylessSession.value)
+    ]
+}
+
 // MARK: - Repository
 
 /// The design doc's repository, executable: typed commands against the

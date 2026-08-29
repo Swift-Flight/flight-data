@@ -30,9 +30,28 @@ import PostgresNIO
 /// agree about which firing they are competing for, because the scheduler
 /// passes the schedule's own instant rather than a local `now`.
 ///
-/// Exactly one insert can succeed, so exactly one process runs the job. A
+/// Exactly one insert can succeed, so at most one process runs the job. A
 /// process that loses does nothing, which is the intended outcome and not an
 /// error.
+///
+/// ## "At most once", and why that word matters
+///
+/// The lease row is written *before* the job runs, and ``release(job:scheduledFor:)``
+/// is a deliberate no-op. So a claimant that crashes mid-job has consumed that
+/// firing permanently: no other process picks it up, there is no lease expiry,
+/// and the only trace is a `claimed_by` row for a job that produced nothing.
+///
+/// This is a choice, not an oversight. A lease with an expiry has to guess how
+/// long the job takes, and guessing short means a long job gets run *twice* —
+/// concurrently, on two servers, which for the billing run this exists to
+/// protect is far worse than not running. So the trade is made in one
+/// direction, on purpose: **never twice, at the price of possibly never.**
+///
+/// If a missed firing is the more expensive failure for a particular job, this
+/// is the wrong coordinator for it — that job wants a work queue with
+/// acknowledgement and redelivery, not a lease. And either way, alert on the
+/// job's *effect* rather than on the lease table: the row says a process
+/// claimed the firing, never that it finished it.
 public struct PostgresJobCoordinator: JobCoordinator {
     private let dataSource: PostgresDataSource
     private let table: String
@@ -45,7 +64,9 @@ public struct PostgresJobCoordinator: JobCoordinator {
     ///   - table: Where leases live. Overridable for a deployment that
     ///     partitions by schema.
     ///   - owner: Recorded on the winning row so an operator can see *which*
-    ///     server ran a job. Defaults to the host name.
+    ///     server ran a job. Defaults to the host name — note that resolving
+    ///     it can block, so a caller constructing coordinators on a latency
+    ///     path should pass one rather than take the default.
     ///   - logger: Where claim failures are reported.
     public init(
         dataSource: PostgresDataSource,
@@ -85,6 +106,9 @@ public struct PostgresJobCoordinator: JobCoordinator {
     /// would let a restarted process re-run the same firing. Old rows are
     /// removed by ``prune(olderThan:)`` on whatever schedule suits the
     /// deployment — including, appropriately, a scheduled job.
+    ///
+    /// This is also what makes the guarantee "at most once" rather than
+    /// "once" — see the type's own discussion.
     public func release(job: String, scheduledFor: Date) async {}
 
     /// Deletes leases older than `age`, returning how many were removed.
@@ -95,17 +119,30 @@ public struct PostgresJobCoordinator: JobCoordinator {
     /// table trivial.
     @discardableResult
     public func prune(olderThan age: Duration) async throws -> Int {
-        let cutoff = Date().addingTimeInterval(-Double(age.components.seconds))
+        // The fractional part counts. Reading only `components.seconds` meant
+        // `.milliseconds(500)` truncated to zero and pruned *everything* older
+        // than now — including the firing currently being claimed.
+        let seconds =
+            Double(age.components.seconds)
+            + Double(age.components.attoseconds) / 1e18
+        let cutoff = Date().addingTimeInterval(-seconds)
         return try await dataSource.withConnection { connection in
+            // Counted server-side. `RETURNING job` walked every deleted row
+            // back across the wire to add one to a counter, which for the
+            // yearly cleanup this is meant for is the whole table.
             let rows = try await connection.query(
                 """
-                DELETE FROM \(unescaped: quoted(table)) WHERE scheduled_for < \(cutoff)
-                RETURNING job
+                WITH pruned AS (
+                    DELETE FROM \(unescaped: quoted(table)) WHERE scheduled_for < \(cutoff)
+                    RETURNING 1
+                )
+                SELECT count(*) FROM pruned
                 """,
                 logger: logger)
-            var deleted = 0
-            for try await _ in rows.decode(String.self, context: .default) { deleted += 1 }
-            return deleted
+            for try await count in rows.decode(Int64.self, context: .default) {
+                return Int(count)
+            }
+            return 0
         }
     }
 
@@ -125,6 +162,15 @@ public struct PostgresJobCoordinator: JobCoordinator {
                     claimed_at timestamptz NOT NULL,
                     PRIMARY KEY (job, scheduled_for)
                 )
+                """,
+                logger: logger)
+            // `prune` filters on `scheduled_for` alone, and the primary key
+            // leads with `job` — so without this, cleanup sequential-scans the
+            // whole table.
+            _ = try await connection.query(
+                """
+                CREATE INDEX IF NOT EXISTS \(unescaped: quoted(table + "_scheduled_for_idx"))
+                ON \(unescaped: quoted(table)) (scheduled_for)
                 """,
                 logger: logger)
         }

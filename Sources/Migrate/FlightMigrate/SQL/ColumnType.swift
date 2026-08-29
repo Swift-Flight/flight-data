@@ -64,8 +64,12 @@ public enum DefaultValue: Sendable, Equatable {
     case double(Double)
     /// `TRUE` / `FALSE`.
     case bool(Bool)
-    /// `UUID`
-    case uuid
+    /// `gen_random_uuid()` — a generated v4 UUID, the pgcrypto/PG13+ builtin.
+    ///
+    /// Named for what it produces rather than what it renders, and documented
+    /// as "UUID" before, which read as a *type* rather than a default and left
+    /// the only way to tell being to render it.
+    case generatedUUID
     
     var sql: String {
         switch self {
@@ -76,7 +80,7 @@ public enum DefaultValue: Sendable, Equatable {
         case .int(let value): return "\(value)"
         case .double(let value): return "\(value)"
         case .bool(let value): return value ? "TRUE" : "FALSE"
-        case .uuid: return "gen_random_uuid()"
+        case .generatedUUID: return "gen_random_uuid()"
         }
     }
 }

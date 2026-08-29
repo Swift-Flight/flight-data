@@ -139,10 +139,39 @@ public final class SchemaBuilder {
         statements.append(sql)
     }
 
+    /// Postgres truncates an identifier at 63 bytes, silently. Two long index
+    /// names differing only past that point become the same name server-side —
+    /// so the second `CREATE INDEX` fails with a duplicate, or worse, an
+    /// `IF NOT EXISTS` variant quietly does nothing and the index the migration
+    /// meant to create is not there.
+    static let maximumIdentifierBytes = 63
+
     private func defaultIndexName(table: String, columns: [String]) -> String {
         // Strip any schema qualification from the table for the index name.
         let bareTable = table.split(separator: ".").last.map(String.init) ?? table
-        return ([bareTable] + columns + ["idx"]).joined(separator: "_")
+        let name = ([bareTable] + columns + ["idx"]).joined(separator: "_")
+        return Self.truncatedIdentifier(name)
+    }
+
+    /// Truncates to Postgres' limit, keeping a short hash of the full name so
+    /// two names that share a long prefix stay distinct — which is the whole
+    /// hazard that makes truncating better done here than server-side.
+    static func truncatedIdentifier(_ name: String) -> String {
+        guard name.utf8.count > maximumIdentifierBytes else { return name }
+        // FNV-1a, rendered as eight hex digits. Not cryptographic and does not
+        // need to be: it separates names a human wrote, not names an adversary
+        // chose.
+        var hash: UInt32 = 2_166_136_261
+        for byte in name.utf8 {
+            hash = (hash ^ UInt32(byte)) &* 16_777_619
+        }
+        let suffix = "_" + String(hash, radix: 16, uppercase: false)
+        var head = Array(name.utf8.prefix(maximumIdentifierBytes - suffix.utf8.count))
+        // Never split a multi-byte scalar.
+        while !head.isEmpty, head[head.count - 1] & 0b1100_0000 == 0b1000_0000 {
+            head.removeLast()
+        }
+        return String(decoding: head, as: UTF8.self) + suffix
     }
 }
 

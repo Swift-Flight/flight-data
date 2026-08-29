@@ -214,4 +214,35 @@ struct CLIParsingTests {
             _ = try RootCommand.parseAsRoot(["destroy-everything"])
         }
     }
+
+    @Test("--version matches the changelog's most recent release")
+    func versionIsNotStale() throws {
+        // It sat at "0.1.0" through two releases, because nothing connected it
+        // to anything. A compiled binary cannot read the package manifest and
+        // the build plugin cannot see the tag, so the constant is
+        // hand-maintained — and this is what makes forgetting it fail.
+        let changelog = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()  // FlightMigrateTests
+            .deletingLastPathComponent()  // Migrate
+            .deletingLastPathComponent()  // Tests
+            .deletingLastPathComponent()  // package root
+            .appendingPathComponent("CHANGELOG.md")
+        let contents = try String(contentsOf: changelog, encoding: .utf8)
+
+        let latest = contents
+            .split(separator: "\n")
+            .compactMap { line -> String? in
+                guard line.hasPrefix("## [") else { return nil }
+                return String(line.dropFirst(4).prefix(while: { $0 != "]" }))
+            }
+            .first { $0 != "Unreleased" }
+
+        #expect(
+            flightMigrateVersion == latest,
+            """
+            flight-migrate --version reports \(flightMigrateVersion) but the changelog's most \
+            recent release is \(latest ?? "none"). Update `flightMigrateVersion` in \
+            Commands.swift when cutting a release.
+            """)
+    }
 }

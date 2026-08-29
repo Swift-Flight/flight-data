@@ -4,6 +4,149 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-29
+
+A source audit of every product in `Sources/` found two critical defects, a
+cluster of moderate bugs, and — behind most of them — one structural cause:
+the Postgres and Valkey pools are the same machine, and every fix had been
+landing on exactly one of them. This release fixes the defects and removes
+the thing that kept manufacturing them.
+
+### Fixed
+
+- **The Postgres pool wedged permanently after a total outage, and `ping()`
+  reported it alive.** `replaceBrokenConnections` returned after a single
+  failed dial, on the reasoning that the next checkout or release would
+  re-trigger replacement. That holds while some connections survive; once an
+  outage retires all of them there are no more releases, and a checkout
+  finding an empty free list never reached the branch that yields the trigger.
+  The pool sat at zero established connections, answering `poolExhausted` and
+  blaming the operator's `pool_size`, until the process was restarted — a
+  transient outage made permanent. Meanwhile `ping()` swallowed
+  `poolExhausted` unconditionally, so the wedged pod reported healthy.
+
+  The Valkey driver had already found this and fixed it with a backoff loop;
+  that fix is ported, and the ping swallow is gated on there being connections
+  to be busy. Both drivers now have an outage suite, and both are wired into
+  `scripts/test.sh` — they were gated on environment variables nothing set, so
+  the only coverage of the wedge never ran.
+
+- **`FlightPubSubValkey` accepted `rediss://` and never enabled TLS**, so the
+  client sent `AUTH` with the password over plaintext RESP: the credential
+  leaked on the very path the operator asked to encrypt. Its URL parsing was
+  re-implemented smaller than the cache adapter's and wrong in the ways that
+  one had already fixed — no `valkeys://`; a database path segment accepted
+  and silently ignored; and `valkey://:secret@host` setting a password with no
+  username, which the auth guard then read as "no credentials" and **skipped
+  authentication entirely**. It now takes the same shapes and produces the
+  same client configuration, timeout hardening included.
+
+- **`migrationsTableExists` could not find its own ledger.** `to_regclass`
+  parses its argument as an identifier and was handed the raw configured
+  name while the DDL rendered it quoted, so any quote-requiring name — such
+  as `--migrations-table Ledger` — made `status()`, `planMigrate()`,
+  `rollback()` and `repair()` see an empty ledger forever, while `migrate()`
+  worked.
+
+- **`@CachePut` returning nil left the stale value in cache.** It routed
+  through the same don't-cache-absence rule `@Cacheable` needs, so the put
+  neither overwrote nor removed and the next read served the pre-put value —
+  from an annotation whose entire promise is that it always overwrites. A nil
+  result now evicts.
+
+- **Every `InMemoryCache` hit was O(n).** The recency order was an
+  `OrderedDictionary` refreshed by remove-and-reinsert; that stores keys and
+  values in dense arrays, so at the default 10,000-entry bound each hit shifted
+  ~10,000 elements twice, under a comment claiming O(1). It is an intrusive
+  linked list now, and the perf suite measures a hit at the real bound rather
+  than only fresh-key writes at a smaller one.
+
+- **The leaked-transaction recovery path skipped session reset.** A `ROLLBACK`
+  undoes the transaction, not the `SET ROLE` that came with it, and repooling
+  straight after it handed that role to the next scope — the exact cross-tenant
+  read `DISCARD ALL` exists to prevent, on the path most likely to be carrying
+  tenant state.
+
+- **The Postgres URL parser percent-decoded credentials twice**, silently
+  corrupting any password containing an escape.
+
+- **The Valkey cache's TTL clamp let a negative duration through** to `PX`,
+  which tells the server to delete the key. The guard tested `attoseconds > 0`,
+  and a negative duration carries its sign in whichever component is non-zero.
+
+- **Derived Valkey hash keys did not escape the separator**, so a String
+  primary key containing `:` collided with a composite key — one row's writes
+  landing on another's hash.
+
+- **`PostgresJobCoordinator.prune` truncated sub-second ages to zero**, which
+  prunes everything older than *now*, including the firing being claimed.
+
+- The PubSub adapter's shutdown ordering was a 50 ms sleep that evaporates
+  under cancellation; it waits for the subscribe loop now. `@Transactional`'s
+  async `begin()` marked the connection after `BEGIN` rather than before,
+  leaving a window where a cancelled task repooled a connection mid-transaction.
+  A cancelled waiting checkout spun out the rest of its timeout.
+
+### Added
+
+- **A pool at capacity is a queue, not a wall.** `checkout()` returning
+  promptly-or-throwing is a property of the *synchronous* primitive, and it had
+  been read as the policy for the whole seam — so `pool_size` was a hard
+  concurrency ceiling and the (pool_size + 1)th concurrent request failed
+  rather than waiting a few milliseconds for the one ahead of it.
+
+  `checkout(waitingUpTo:)` is now part of the `DataSource` contract with a
+  polling default, so every store queues; `withConnection` is defined on it;
+  and `datasource.<name>.checkout_timeout_ms` (default 5s) bounds the wait.
+  Both drivers override it with a native handoff. The parked-waiter machinery
+  lives in `ConnectionWaiters` in core — written once rather than once per
+  driver, which is how the twins drifted apart in the first place.
+
+- **Valkey clears session state on release**, matching Postgres:
+  `DISCARD`/`UNWATCH`/`SELECT` in one pipelined round trip, under the same
+  `datasource.<name>.reset_on_release` key. A scope that ran `SELECT 5` through
+  the raw command hatch was handing the next scope the wrong database, and a
+  leaked `WATCH` made an unrelated `MULTI` abort for no visible reason.
+
+- **Valkey's `ping()` tolerates a saturated pool**, as Postgres's already did.
+
+- `DataSourceConformance` gained the clauses it was missing — `ping`, a release
+  check that means something for pools larger than eight, concurrent-checkout
+  safety, and the queueing contract — and **both drivers now actually run it**,
+  which is the failure mode its own doc comment says it exists to end.
+
+- `PendingConnections.offering(_:connection:returning:)` replaces binding the
+  task-local by hand. The old call site *replaced* the offers dictionary, so a
+  nested unit of work on a second datasource erased the outer offer and sent
+  that scope down the non-waiting path — failing beside its own reserved
+  connection.
+
+- CLI flags for `--lock-timeout`, `--advisory-lock-key` and
+  `--fail-on-unknown-applied`; `--version` reports the real version and a test
+  pins it to the changelog.
+
+### Changed
+
+- **The PubSub wire format changed.** `WireMessage` was `Codable` with a `Data`
+  payload, and `JSONEncoder` renders `Data` as base64 — so a comment claiming
+  the payload "crosses as bytes rather than being base64'd" was true only of
+  the outer RESP frame, while chat fan-out paid a third more wire and an
+  encode/decode on every hop. Frames are now a magic + length-prefixed JSON
+  header followed by the payload verbatim. **Nodes must be upgraded together**;
+  a node on the old build drops the new frames rather than misreading them.
+
+- `DefaultValue.uuid` is `DefaultValue.generatedUUID`, named for what it
+  produces rather than reading as a column type.
+
+- `PostgresJobCoordinator`'s guarantee is documented as **at most once**, and
+  the trade is stated: the lease is written before the job runs and `release`
+  is a no-op, so a claimant that crashes mid-job consumes the firing. That is
+  deliberate — a lease with an expiry runs a long job twice — but it was not
+  written down anywhere.
+
+- `Offer.isUnclaimed` is gone. It had no callers and invited the TOCTOU its one
+  real consumer correctly avoided.
+
 ## [0.3.0] - 2026-08-25
 
 ### Added

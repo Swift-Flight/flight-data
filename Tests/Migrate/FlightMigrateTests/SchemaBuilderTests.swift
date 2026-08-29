@@ -354,4 +354,36 @@ struct RawTests {
         schema.raw("   ;  ")
         #expect(schema.statements.isEmpty)
     }
+
+    @Test("a default index name is truncated to Postgres' identifier limit")
+    func longIndexNamesAreTruncatedDistinctly() {
+        let table = String(repeating: "a", count: 50)
+        let schema = SchemaBuilder()
+        schema.createIndex(on: table, columns: [String(repeating: "b", count: 30)])
+        schema.createIndex(on: table, columns: [String(repeating: "c", count: 30)])
+
+        let names = schema.statements.map { statement -> String in
+            // `CREATE INDEX "name" ON …`
+            let afterIndex = statement.drop(while: { $0 != "\"" }).dropFirst()
+            return String(afterIndex.prefix(while: { $0 != "\"" }))
+        }
+        for name in names {
+            #expect(
+                name.utf8.count <= 63,
+                "Postgres truncates past 63 bytes silently; \(name.utf8.count) bytes does not fit")
+        }
+        // The hazard is not the length, it is two long names colliding after
+        // the server truncates them — the second CREATE INDEX then fails, or an
+        // IF NOT EXISTS one quietly does nothing.
+        #expect(names[0] != names[1], "names sharing a long prefix must stay distinct")
+    }
+
+    @Test("DefaultValue.generatedUUID renders the builtin")
+    func generatedUUIDDefault() {
+        let schema = SchemaBuilder()
+        schema.createTable("t") { t in
+            t.uuid("id").primaryKey().default(.generatedUUID)
+        }
+        #expect(schema.statements[0].contains("DEFAULT gen_random_uuid()"))
+    }
 }

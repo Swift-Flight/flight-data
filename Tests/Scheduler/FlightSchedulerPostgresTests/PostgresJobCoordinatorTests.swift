@@ -123,6 +123,23 @@ struct PostgresJobCoordinatorTests {
         }
     }
 
+    @Test("a sub-second prune age does not truncate to zero")
+    func pruneKeepsSubSecondPrecision() async throws {
+        try await withCoordinator { coordinator in
+            let now = Date()
+            #expect(try await coordinator.claim(job: "fresh", scheduledFor: now))
+
+            // `components.seconds` alone truncates this to zero, which prunes
+            // everything older than *now* — including the firing a process is
+            // in the middle of running.
+            let removed = try await coordinator.prune(olderThan: .milliseconds(500))
+            #expect(removed == 0, "a half-second age must not become a zero-second one")
+            #expect(
+                try await coordinator.claim(job: "fresh", scheduledFor: now) == false,
+                "the lease must still be there, or the firing is re-runnable")
+        }
+    }
+
     @Test("a table name with a quote in it cannot break out of the identifier")
     func tableNameIsQuoted() async throws {
         // The table name is configuration, and configuration reaches SQL as

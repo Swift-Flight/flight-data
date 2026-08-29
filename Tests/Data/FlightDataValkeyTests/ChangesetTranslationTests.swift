@@ -54,6 +54,51 @@ struct ChangesetTranslationTests {
         }
     }
 
+    @Test func aSeparatorInsideAPrimaryKeyCannotCollideWithAComposite() throws {
+        // `:` is the separator and an ordinary character in a String primary
+        // key, so unescaped these two rows shared a hash — and one's writes
+        // landed on the other. Same escaping rule as `CacheKey`.
+        let colonInKey = try Changeset(Session.self)
+            .change(\.id, "a:b")
+            .change(\.userID, 1)
+            .validatedChanges()
+        let plan = try #require(
+            try ValkeyChangesetTranslation.plan(colonInKey, for: Session.self))
+        #expect(plan.key == #"session:a\:b"#)
+
+        // The composite spelling that used to render identically.
+        let composite = try Changeset(TwoPartKeySession.self)
+            .change(\.left, "a")
+            .change(\.right, "b")
+            .validatedChanges()
+        let compositePlan = try #require(
+            try ValkeyChangesetTranslation.plan(composite, for: TwoPartKeySession.self))
+        #expect(compositePlan.key == "two_part:a:b")
+        #expect(plan.key != compositePlan.key.replacingOccurrences(of: "two_part", with: "session"))
+    }
+
+    @Test func aBackslashInAPrimaryKeyIsEscapedToo() throws {
+        // Otherwise `a\` + `b` and `a` + `\b`-style pairs can be made to
+        // collide by writing the escape character by hand.
+        let changes = try Changeset(Session.self)
+            .change(\.id, #"a\b"#)
+            .change(\.userID, 1)
+            .validatedChanges()
+        let plan = try #require(try ValkeyChangesetTranslation.plan(changes, for: Session.self))
+        #expect(plan.key == #"session:a\\b"#)
+    }
+
+    @Test func aModelWithNoPrimaryKeyThrowsRatherThanTrapping() throws {
+        // It used to be a `precondition`. A model missing a primary-key
+        // *field* threw, and a model missing the primary-key *declaration*
+        // crashed the process — the same class of mistake with two different
+        // failure postures.
+        let changes = try Changeset(KeylessSession.self).change(\.value, "x").validatedChanges()
+        #expect(throws: ValkeyChangesetError.noPrimaryKey(model: "KeylessSession")) {
+            try ValkeyChangesetTranslation.plan(changes, for: KeylessSession.self)
+        }
+    }
+
     @Test func explicitKeyOverridesDerivation() throws {
         let changes = try Changeset(Session.self).change(\.userID, 1).validatedChanges()
         let plan = try #require(

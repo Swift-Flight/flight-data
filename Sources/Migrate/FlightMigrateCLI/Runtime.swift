@@ -25,6 +25,15 @@ enum Runtime {
 
         var migratorConfiguration = FlightMigrator.Configuration()
         migratorConfiguration.migrationsTable = options.migrationsTable
+        // 0 means "wait indefinitely", which is the right choice for an
+        // interactive run someone is watching — and was unreachable from the
+        // CLI, which pinned every run to the 30-second default.
+        migratorConfiguration.lockTimeout =
+            options.lockTimeout > 0 ? .seconds(options.lockTimeout) : nil
+        if let key = options.advisoryLockKey {
+            migratorConfiguration.advisoryLockKey = key
+        }
+        migratorConfiguration.failOnUnknownApplied = options.failOnUnknownApplied
         migratorConfiguration.logger = logger
         migratorConfiguration.onEvent = onEvent
 

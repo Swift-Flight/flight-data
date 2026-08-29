@@ -81,8 +81,16 @@ public final class PostgresTransactionCoordinator: FlightTransactionCoordinator,
     public func begin() throws -> FlightTransactionToken {
         let context = try prepareBegin()
         if context.level == 0 {
-            try run("BEGIN", on: context.connection)
+            // Marked first — see the async twin below for why. There is no
+            // suspension point on this path, but the two spellings staying the
+            // same shape is worth more than the microsecond.
             try markTransactionOpen(context.connection)
+            do {
+                try run("BEGIN", on: context.connection)
+            } catch {
+                markTransactionClosed(context.connection)
+                throw error
+            }
         } else {
             try run("SAVEPOINT \(savepointName(context.level))", on: context.connection)
         }
@@ -290,8 +298,28 @@ extension PostgresTransactionCoordinator: FlightAsyncTransactionCoordinator {
     public func begin() async throws -> FlightTransactionToken {
         let context = try prepareBegin()
         if context.level == 0 {
-            try await runAsync("BEGIN", on: context.connection)
+            // Marked *before* the statement is sent, not after.
+            //
+            // The two used to be the other way round, which left a suspension
+            // point between `BEGIN` landing server-side and the pool being
+            // told about it. A task cancelled in that window — or a `BEGIN`
+            // whose reply never came back — had a connection with an open
+            // transaction that the pool believed was clean, so with
+            // `reset_on_release: false` it repooled mid-transaction and the
+            // next scope's writes silently joined a transaction nobody would
+            // ever commit. Low probability, and the blast radius is every
+            // write that scope made.
+            //
+            // Marking first is the safe order: the cost of being wrong is a
+            // spurious `ROLLBACK` on a connection that has nothing to roll
+            // back, which Postgres answers with a warning and no harm.
             try markTransactionOpen(context.connection)
+            do {
+                try await runAsync("BEGIN", on: context.connection)
+            } catch {
+                markTransactionClosed(context.connection)
+                throw error
+            }
         } else {
             try await runAsync("SAVEPOINT \(savepointName(context.level))", on: context.connection)
         }
