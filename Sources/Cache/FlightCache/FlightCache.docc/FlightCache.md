@@ -51,9 +51,14 @@ replaceable when the payload deserves something denser.
 ## Expiry is policy, not a magic number
 
 ``CacheTTLPolicy`` centralizes TTLs so they live in configuration rather than
-scattered across annotations. ``CacheRuntime`` is what the annotations
-actually call, and ``FlightCaches`` names the configured caches when an
-application has more than one.
+scattered across annotations. ``CacheRuntime`` is what the annotations actually
+call, and ``FlightCaches`` is how they find it — a process-level access point
+with a task-local override, because a body macro cannot add members and there
+is no ambient container to ask.
+
+It is a seam, not a registry: there is one runtime, resolved as override →
+installed → a warn-once no-op. An application with several caches configures
+several *namespaces* on one runtime, not several runtimes.
 
 ## Topics
 

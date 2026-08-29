@@ -86,12 +86,19 @@ public actor SingleFlight {
         releaseObservers(for: key) { _ in true }
     }
 
+    // MARK: - Instrumentation
+    //
+    // Internal, not public. All of this exists for this package's own
+    // concurrency tests and nothing else — it was public API for a while,
+    // which meant ~45 lines of test scaffolding in the surface a consumer has
+    // to read and this package has to keep working. `@testable` reaches it.
+
     /// In-flight key count — introspection for tests.
-    public var inFlightCount: Int { waiters.count }
+    var inFlightCount: Int { waiters.count }
 
     /// Callers currently coalesced onto `key`'s flight, excluding its
     /// leader.
-    public func coalescedCount(on key: CacheKey) -> Int {
+    func coalescedCount(on key: CacheKey) -> Int {
         waiters[key]?.count ?? 0
     }
 
@@ -104,7 +111,7 @@ public actor SingleFlight {
     /// in that order" has to sleep and hope — which is a race dressed up
     /// as a delay, and it silently stops testing the intended interleaving
     /// on a loaded machine. This makes the ordering exact.
-    public func waitUntilCoalescing(_ count: Int, on key: CacheKey) async {
+    func waitUntilCoalescing(_ count: Int, on key: CacheKey) async {
         guard let parked = waiters[key], parked.count < count else { return }
         await withCheckedContinuation { continuation in
             observers.append(Observer(key: key, threshold: count, continuation: continuation))

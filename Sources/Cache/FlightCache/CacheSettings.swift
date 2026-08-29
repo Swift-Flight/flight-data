@@ -15,6 +15,13 @@ public enum CacheConfigKey {
     /// annotation nor the namespace names a TTL. 0 means "no default".
     public static let defaultTTL = "cache.default_ttl"
     /// `cache.namespaces.<name>` — integer seconds for one namespace.
+    ///
+    /// `0` here means "this namespace names no TTL of its own", so
+    /// ``defaultTTL`` applies — which is *not* what `0` means at
+    /// `cache.default_ttl`, where it means there is no default and entries
+    /// never expire. The asymmetry is deliberate: a zero typed under a
+    /// namespace almost always means "I have not decided", and a zero typed
+    /// at the root almost always means "nothing expires unless it says so".
     public static func namespaceTTL(_ namespace: String) -> String {
         "cache.namespaces.\(namespace)"
     }
@@ -91,11 +98,21 @@ public final class CacheTTLPolicy: Sendable {
         let key = CacheConfigKey.namespaceTTL(namespace)
         do {
             guard let seconds = try configuration.getIfPresent(key, as: Int.self) else { return nil }
+            // Note that `0` here is not what `0` means at `cache.default_ttl`.
+            // There it means "no default, entries never expire"; here it falls
+            // through to the default, because "this namespace has no TTL of its
+            // own" is the far more likely reading of a zero someone typed under
+            // a namespace. Same value, two meanings, so: said out loud, and
+            // logged at debug rather than silently.
             guard seconds > 0 else {
                 if seconds < 0 {
                     logger.error("ignoring negative per-namespace TTL; the default applies", metadata: [
                         "key": "\(key)", "value": "\(seconds)",
                     ])
+                } else {
+                    logger.debug(
+                        "per-namespace TTL of 0 means 'no TTL of its own', so the default applies — unlike cache.default_ttl: 0, which means no default at all",
+                        metadata: ["key": "\(key)"])
                 }
                 return nil
             }

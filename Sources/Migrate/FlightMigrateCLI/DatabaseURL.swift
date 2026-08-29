@@ -53,8 +53,9 @@ struct DatabaseURL: Equatable {
             throw CLIError.invalidDatabaseURL(
                 raw,
                 reason: """
-                    unix domain socket hosts are not supported by the CLI; use the library API \
-                    with a hand-built PostgresClient.Configuration instead
+                    unix domain socket hosts are not supported by the CLI. Use the library \
+                    API: build a PostgresClient.Configuration yourself and hand it to \
+                    FlightMigrator(client:migrations:configuration:)
                     """)
         }
 

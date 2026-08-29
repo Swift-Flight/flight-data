@@ -64,9 +64,16 @@ struct ModuleTests {
 
     @Test("without any install, annotations run against the no-op runtime")
     func unwiredFailsOpen() async throws {
-        FlightCaches.uninstall()
-        let executions = try await confirmationFreeCount()
-        #expect(executions == 2)
+        // Under the lock like every other seam-touching test: `uninstall()`
+        // mutates process-global state, and this target's suites run in
+        // parallel with each other by default. Uninstalling underneath a test
+        // that had just installed a runtime is a failure that reproduces only
+        // sometimes, which is the worst kind to be handed.
+        try await GlobalCacheSeam.exclusive {
+            FlightCaches.uninstall()
+            let executions = try await confirmationFreeCount()
+            #expect(executions == 2)
+        }
     }
 
     private func confirmationFreeCount() async throws -> Int {
@@ -109,29 +116,33 @@ struct CacheCodecSeamTests {
 
     @Test("an application's registered codec is the one the runtime uses")
     func registeredCodecIsUsed() async throws {
-        defer { FlightCaches.uninstall() }
-        let application = try Flight.assemble(
-            configuration: Configuration(),
-            modules: [FlightCacheModule.self, MarkerCodecModule.self])
-        let runtime = try application.container.resolve(CacheRuntime.self)
-        _ = try await runtime.cacheable(namespace: "codec", parts: ["1"], ttl: .seconds(60)) { 42 }
+        try await GlobalCacheSeam.exclusive {
+            defer { FlightCaches.uninstall() }
+            let application = try Flight.assemble(
+                configuration: Configuration(),
+                modules: [FlightCacheModule.self, MarkerCodecModule.self])
+            let runtime = try application.container.resolve(CacheRuntime.self)
+            _ = try await runtime.cacheable(namespace: "codec", parts: ["1"], ttl: .seconds(60)) { 42 }
 
-        let store = try application.container.resolve((any Cache).self)
-        let stored = await store.get(CacheKey(namespace: "codec", parts: ["1"]))
-        #expect(stored.map { String(decoding: $0, as: UTF8.self) }?.hasPrefix("marker:") == true)
+            let store = try application.container.resolve((any Cache).self)
+            let stored = await store.get(CacheKey(namespace: "codec", parts: ["1"]))
+            #expect(stored.map { String(decoding: $0, as: UTF8.self) }?.hasPrefix("marker:") == true)
+        }
     }
 
     @Test("no registered codec still means JSON")
     func defaultCodecIsJSON() async throws {
-        defer { FlightCaches.uninstall() }
-        let application = try Flight.assemble(
-            configuration: Configuration(), modules: [FlightCacheModule.self])
-        let runtime = try application.container.resolve(CacheRuntime.self)
-        _ = try await runtime.cacheable(namespace: "codec", parts: ["2"], ttl: .seconds(60)) { 42 }
+        try await GlobalCacheSeam.exclusive {
+            defer { FlightCaches.uninstall() }
+            let application = try Flight.assemble(
+                configuration: Configuration(), modules: [FlightCacheModule.self])
+            let runtime = try application.container.resolve(CacheRuntime.self)
+            _ = try await runtime.cacheable(namespace: "codec", parts: ["2"], ttl: .seconds(60)) { 42 }
 
-        let store = try application.container.resolve((any Cache).self)
-        let stored = await store.get(CacheKey(namespace: "codec", parts: ["2"]))
-        #expect(stored.map { String(decoding: $0, as: UTF8.self) } == "42")
+            let store = try application.container.resolve((any Cache).self)
+            let stored = await store.get(CacheKey(namespace: "codec", parts: ["2"]))
+            #expect(stored.map { String(decoding: $0, as: UTF8.self) } == "42")
+        }
     }
 }
 

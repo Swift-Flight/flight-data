@@ -65,4 +65,23 @@ struct PostgresDataSourceURLTests {
                 "postgres://localhost/app?sslmodee=disable", datasource: "primary")
         }
     }
+
+    @Test("a password containing a percent escape survives")
+    func passwordWithALiteralPercentEscape() throws {
+        // `URLComponents.password` is already decoded, and this used to decode
+        // it a second time: `%2541` in the URL decodes to the literal `%41`,
+        // which the second pass turned into `A`. The existing `s%40cret` test
+        // could not see it — `s@cret` decodes to itself — so the corruption
+        // only ever showed up as an authentication failure blaming the server.
+        let url = try PostgresDataSourceURL.parse(
+            "postgres://app:pa%2541ss@db.internal:5432/orders", datasource: "primary")
+        #expect(url.password == "pa%41ss")
+    }
+
+    @Test("a username containing a percent escape survives too")
+    func usernameWithALiteralPercentEscape() throws {
+        let url = try PostgresDataSourceURL.parse(
+            "postgres://a%2542b:secret@db.internal:5432/orders", datasource: "primary")
+        #expect(url.username == "a%42b")
+    }
 }

@@ -36,8 +36,9 @@ public final class PostgresDataSource: DataSource, Sendable {
     /// never grows the pool — a caller past the ceiling queues rather than
     /// growing it (core delta D8).
     public let poolSize: Int
-    /// The parsed `datasource.<name>.url`.
-    public let url: PostgresDataSourceURL
+    /// The parsed `datasource.<name>.url` — `nil` when the pool was built
+    /// from a hand-made `PostgresConnection.Configuration` instead.
+    public let url: PostgresDataSourceURL?
     /// How long `withConnection` queues before `poolExhausted`, from
     /// `datasource.<name>.checkout_timeout_ms`.
     public let checkoutTimeout: Duration
@@ -89,19 +90,89 @@ public final class PostgresDataSource: DataSource, Sendable {
     /// being wrong is one request reading another tenant's rows.
     public let resetOnRelease: Bool
 
-    public init(
+    /// What `dial()` connects with. Derived from `url` in the usual case, or
+    /// handed over whole by the escape-hatch initializer.
+    private let connectionConfiguration: PostgresConnection.Configuration
+
+    public convenience init(
         settings: DataSourceSettings,
         resetOnRelease: Bool = true,
         logger: Logger? = nil
     ) throws {
-        self.name = settings.name
-        self.poolSize = settings.poolSize
-        self.checkoutTimeout = settings.checkoutTimeout
-        self.resetOnRelease = resetOnRelease
         // Parsed here — at freeze()'s eager singleton construction — so a
-        // malformed URL fails bootstrap, not the first query ( posture).
-        self.url = try PostgresDataSourceURL.parse(settings.url, datasource: settings.name)
-        self.logger = logger ?? Logger(label: "flight.data.postgres.\(settings.name)")
+        // malformed URL fails bootstrap, not the first query.
+        let url = try PostgresDataSourceURL.parse(settings.url, datasource: settings.name)
+        self.init(
+            name: settings.name,
+            poolSize: settings.poolSize,
+            checkoutTimeout: settings.checkoutTimeout,
+            url: url,
+            configuration: try url.connectionConfiguration(),
+            resetOnRelease: resetOnRelease,
+            logger: logger)
+    }
+
+    /// The escape hatch: a pool dialing a connection configuration you built
+    /// yourself.
+    ///
+    /// `datasource.<name>.url` covers what a URL can say, and deliberately
+    /// only that — `sslmode` maps onto PostgresNIO's three TLS modes and stops
+    /// there. Two things genuinely do not fit in a URL: a **unix domain
+    /// socket**, and the stricter libpq modes (`verify-ca`, `verify-full`)
+    /// that need a CA bundle to verify against.
+    ///
+    /// Both the URL parser's doc comment and the migrate CLI's error message
+    /// told people to "construct the Configuration yourself" — and there was
+    /// no initializer that would take one, so following the advice was
+    /// impossible. This is it.
+    ///
+    /// ```swift
+    /// var tls = TLSConfiguration.makeClientConfiguration()
+    /// tls.trustRoots = .file("/etc/ssl/certs/rds-ca.pem")
+    /// let source = try PostgresDataSource(
+    ///     name: "primary",
+    ///     configuration: .init(
+    ///         unixSocketPath: "/var/run/postgresql/.s.PGSQL.5432",
+    ///         username: "app", password: nil, database: "app"),
+    ///     poolSize: 10)
+    /// ```
+    ///
+    /// Register it with `container.register(dataSource: source, name: "primary")`.
+    public convenience init(
+        name: String,
+        configuration: PostgresConnection.Configuration,
+        poolSize: Int = DataSourceSettings.defaultPoolSize,
+        checkoutTimeout: Duration = DataSourceSettings.defaultCheckoutTimeout,
+        resetOnRelease: Bool = true,
+        logger: Logger? = nil
+    ) {
+        self.init(
+            name: name,
+            poolSize: poolSize,
+            checkoutTimeout: checkoutTimeout,
+            url: nil,
+            configuration: configuration,
+            resetOnRelease: resetOnRelease,
+            logger: logger)
+    }
+
+    private init(
+        name: String,
+        poolSize: Int,
+        checkoutTimeout: Duration,
+        url: PostgresDataSourceURL?,
+        configuration: PostgresConnection.Configuration,
+        resetOnRelease: Bool,
+        logger: Logger?
+    ) {
+        precondition(poolSize >= 1, "a pool needs at least 1 connection")
+        self.name = name
+        self.poolSize = poolSize
+        self.checkoutTimeout = checkoutTimeout
+        self.resetOnRelease = resetOnRelease
+        self.url = url
+        self.connectionConfiguration = configuration
+        self.logger = logger ?? Logger(label: "flight.data.postgres.\(name)")
         self.state = Mutex(PoolState())
         (self.replacementSignal, self.replacementTrigger) = AsyncStream.makeStream(
             of: Void.self, bufferingPolicy: .bufferingNewest(1))
@@ -146,7 +217,8 @@ public final class PostgresDataSource: DataSource, Sendable {
             }
             logger.info("postgres pool started", metadata: [
                 "datasource": "\(name)", "pool_size": "\(poolSize)",
-                "host": "\(url.host)", "database": "\(url.database)",
+                "host": "\(url?.host ?? "<configured directly>")",
+                "database": "\(url?.database ?? connectionConfiguration.database ?? "")",
             ])
         } catch {
             await shutdown()
@@ -209,7 +281,7 @@ public final class PostgresDataSource: DataSource, Sendable {
             return state.nextConnectionID
         }
         return try await PostgresConnection.connect(
-            configuration: try url.connectionConfiguration(),
+            configuration: connectionConfiguration,
             id: id,
             logger: logger
         )

@@ -145,7 +145,31 @@ the thing that kept manufacturing them.
   written down anywhere.
 
 - `Offer.isUnclaimed` is gone. It had no callers and invited the TOCTOU its one
-  real consumer correctly avoided.
+  real consumer correctly avoided. `SingleFlight`'s coalescing instrumentation
+  (`inFlightCount`, `coalescedCount`, `waitUntilCoalescing`) is internal rather
+  than public — it exists for this package's own concurrency tests, and
+  `@testable` reaches it.
+
+- Both drivers throw `DataSourceError.notStarted` instead of shadowing it with
+  a driver-local enum; `PostgresDataSourceError` and `ValkeyDataSourceError` are
+  gone. A portable error vocabulary is only portable if the drivers use it.
+
+- `PostgresDataSource(name:configuration:…)` takes a
+  `PostgresConnection.Configuration` you built yourself — for a unix domain
+  socket, or for `verify-ca`/`verify-full` with a CA bundle. Both the URL
+  parser's doc comment and the migrate CLI's error message had been
+  recommending this escape hatch, which did not exist.
+
+- `@Cacheable(namespace:)` rejects a namespace outside lowercase letters,
+  digits, underscores and dots. It becomes the config key
+  `cache.namespaces.<name>`, which Flight's environment overrides render as
+  `FLIGHT_CACHE_NAMESPACES_…` — so a hyphen produced a variable no shell can
+  set and a TTL nobody could configure. The rule was documented and enforced
+  nowhere; the macro already requires a literal, so it can check it.
+
+- The `_`-named-parameter diagnostic said to "add it to `excluding:` by its
+  external label", but matching is by internal name — so following the advice
+  produced a second error. It says to name the parameter.
 
 ## [0.3.0] - 2026-08-25
 

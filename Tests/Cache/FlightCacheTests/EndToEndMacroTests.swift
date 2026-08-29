@@ -121,11 +121,16 @@ struct EndToEndMacroTests {
 
     @Test("without a bound runtime, annotated methods still work — uncached")
     func unwiredAnnotationsFailOpen() async throws {
-        let service = PricingService()
-        FlightCaches.uninstall()
-        let first = try await service.price(for: 5, in: "eu")
-        let second = try await service.price(for: 5, in: "eu")
-        #expect(first == 500 && second == 500)
-        #expect(service.executions.withLock { $0 } == 2)
+        // `uninstall()` is process-global, so this holds the lock the package
+        // invented for exactly this — otherwise it can pull the runtime out
+        // from under a test running beside it.
+        try await GlobalCacheSeam.exclusive {
+            let service = PricingService()
+            FlightCaches.uninstall()
+            let first = try await service.price(for: 5, in: "eu")
+            let second = try await service.price(for: 5, in: "eu")
+            #expect(first == 500 && second == 500)
+            #expect(service.executions.withLock { $0 } == 2)
+        }
     }
 }

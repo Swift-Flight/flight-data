@@ -49,6 +49,34 @@ enum CacheMacroSupport {
                         at: argument.expression)
                     return nil
                 }
+                // The charset is enforced here because here is the only place
+                // it can be. The namespace is the `cache.namespaces.<name>`
+                // config key, and Flight's env-var override layer maps keys
+                // through `FLIGHT_` + uppercase + `.` → `_` — so a namespace
+                // with a hyphen in it produces a variable name no shell can
+                // set, and the TTL for that namespace becomes silently
+                // unconfigurable in every deployment that uses environment
+                // overrides. The rule was documented and enforced nowhere; the
+                // macro already demands a literal, so it can check it.
+                let namespace = literal.segments
+                    .compactMap { $0.as(StringSegmentSyntax.self)?.content.text }
+                    .joined()
+                guard !namespace.isEmpty else {
+                    context.diagnoseError(
+                        "cache.namespaceempty",
+                        "namespace: is empty — it is this entry's cache identity and its config key.",
+                        at: argument.expression)
+                    return nil
+                }
+                if let bad = namespace.first(where: {
+                    !($0.isLowercase && $0.isLetter) && !$0.isNumber && $0 != "_" && $0 != "."
+                }) {
+                    context.diagnoseError(
+                        "cache.namespacecharset",
+                        "namespace: '\(namespace)' contains '\(bad)'. Use lowercase letters, digits, underscores and dots: the namespace becomes the config key cache.namespaces.\(namespace), and Flight's environment overrides render that as FLIGHT_CACHE_NAMESPACES_… — anything else produces a variable name a shell cannot set, so the TTL silently cannot be configured.",
+                        at: argument.expression)
+                    return nil
+                }
                 arguments.namespace = literal.trimmedDescription
             case "ttl" where supportsTTL:
                 arguments.ttl = argument.expression.trimmedDescription

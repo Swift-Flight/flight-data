@@ -176,4 +176,167 @@ struct SingleFlightTests {
             return true
         }
     }
+
+    // MARK: - The waiter arms nothing used to reach
+
+    @Test("a leader whose value cannot be encoded leaves waiters to compute")
+    func unpublishableLeaderReleasesWaiters() async throws {
+        // `.unpublishable` — the leader produced a value, it was not nil, and
+        // it could not be encoded. There is nothing to hand a waiter, so each
+        // must run the body itself rather than hang or inherit a failure.
+        let runtime = try runtime()
+        let executions = Counter()
+        let leaderInBody = Gate()
+        let release = Gate()
+
+        let body: @Sendable () async throws -> Unencodable = {
+            executions.increment()
+            if executions.value == 1 {
+                await leaderInBody.open()
+                try await release.wait()
+            }
+            return Unencodable()
+        }
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                _ = try await runtime.cacheable(
+                    namespace: "prices", parts: ["hot"], ttl: nil, as: Unencodable.self, body)
+            }
+            try await leaderInBody.wait()
+            group.addTask {
+                _ = try await runtime.cacheable(
+                    namespace: "prices", parts: ["hot"], ttl: nil, as: Unencodable.self, body)
+            }
+            await runtime.flights.waitUntilCoalescing(1, on: key)
+            await release.open()
+            for try await _ in group {}
+        }
+
+        #expect(executions.value == 2, "the waiter had nothing to decode, so it must compute")
+        #expect(await runtime.flights.inFlightCount == 0)
+    }
+
+    @Test("a waiter whose type cannot decode the leader's bytes computes its own")
+    func typeCollisionWaiterComputes() async throws {
+        // Two methods sharing a key with different value types — legal,
+        // because a key is namespace + arguments and deliberately not the
+        // method name. The waiter must not re-join the flight it cannot use,
+        // which would loop on the same bytes forever.
+        let runtime = try runtime()
+        let executions = Counter()
+        let leaderInBody = Gate()
+        let release = Gate()
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                _ = try await runtime.cacheable(
+                    namespace: "prices", parts: ["hot"], ttl: nil, as: Int.self
+                ) {
+                    await leaderInBody.open()
+                    try await release.wait()
+                    return 42
+                }
+            }
+            try await leaderInBody.wait()
+            group.addTask {
+                let value = try await runtime.cacheable(
+                    namespace: "prices", parts: ["hot"], ttl: nil, as: [String].self
+                ) {
+                    executions.increment()
+                    return ["computed"]
+                }
+                #expect(value == ["computed"])
+            }
+            await runtime.flights.waitUntilCoalescing(1, on: key)
+            await release.open()
+            for try await _ in group {}
+        }
+
+        #expect(executions.value == 1, "the mistyped waiter must compute exactly once")
+        #expect(await runtime.flights.inFlightCount == 0)
+    }
+
+    @Test("the non-throwing overload's waiter is served the leader's bytes")
+    func nonThrowingWaiterArm() async throws {
+        let runtime = try runtime()
+        let executions = Counter()
+        let leaderInBody = Gate()
+        let release = Gate()
+
+        let body: @Sendable () async -> Int = {
+            executions.increment()
+            await leaderInBody.open()
+            try? await release.wait()
+            return 7
+        }
+
+        let values = await withTaskGroup(of: Int.self) { group in
+            group.addTask {
+                await runtime.cacheable(
+                    namespace: "prices", parts: ["hot"], ttl: nil, as: Int.self, body)
+            }
+            try? await leaderInBody.wait()
+            group.addTask {
+                await runtime.cacheable(
+                    namespace: "prices", parts: ["hot"], ttl: nil, as: Int.self, body)
+            }
+            await runtime.flights.waitUntilCoalescing(1, on: key)
+            await release.open()
+            return await group.reduce(into: [Int]()) { $0.append($1) }
+        }
+
+        #expect(values == [7, 7])
+        #expect(executions.value == 1, "the non-throwing waiter must coalesce too")
+    }
+
+    @Test("a cancelled leader hands leadership to its waiter rather than failing it")
+    func cancelledLeaderHandsOver() async throws {
+        // Cancellation is not a cache failure. A waiter whose leader was
+        // cancelled re-enters the flow — becoming the leader itself — rather
+        // than inheriting a `CancellationError` it never asked for, and the
+        // retry is bounded so repeated cancellations cannot livelock it.
+        let runtime = try runtime()
+        let computed = Counter()
+        let leaderInBody = Gate()
+        let neverOpens = Gate()
+
+        let leader = Task {
+            try await runtime.cacheable(
+                namespace: "prices", parts: ["cold"], ttl: nil, as: Int.self
+            ) {
+                computed.increment()
+                await leaderInBody.open()
+                try await neverOpens.wait()
+                return -1
+            }
+        }
+        try await leaderInBody.wait()
+
+        let waiter = Task {
+            try await runtime.cacheable(
+                namespace: "prices", parts: ["cold"], ttl: nil, as: Int.self
+            ) {
+                computed.increment()
+                return 5
+            }
+        }
+        await runtime.flights.waitUntilCoalescing(
+            1, on: CacheKey(namespace: "prices", parts: ["cold"]))
+
+        leader.cancel()
+        _ = try? await leader.value
+
+        #expect(try await waiter.value == 5, "the waiter must get an answer, not the cancellation")
+        #expect(computed.value == 2, "the leader ran, was cancelled, and the waiter took over")
+        #expect(await runtime.flights.inFlightCount == 0)
+    }
+}
+
+/// Encodes to nothing an encoder will accept — for the `.unpublishable` arm.
+/// A `Double.nan` is not representable in JSON, so `JSONEncoder` throws.
+struct Unencodable: Codable, Sendable, Equatable {
+    var value: Double = .nan
+
+    static func == (lhs: Unencodable, rhs: Unencodable) -> Bool { true }
 }

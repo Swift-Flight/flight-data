@@ -337,4 +337,97 @@ struct CacheMacroFixtureTests {
             macroSpecs: testMacros
         )
     }
+
+    @Test("a namespace outside the config charset is refused at the annotation")
+    func namespaceCharsetIsEnforced() {
+        // The namespace becomes the config key `cache.namespaces.<name>`, and
+        // Flight's environment overrides render that as `FLIGHT_CACHE_…` with
+        // dots mapped to underscores. A hyphen therefore produces a variable
+        // name no shell can set, and that namespace's TTL becomes silently
+        // unconfigurable in every deployment that uses env overrides. The rule
+        // was documented and enforced nowhere.
+        assertMacroExpansion(
+            """
+            final class S {
+                @Cacheable(namespace: "hot-prices")
+                func price(id: Int) async throws -> Int {
+                    id
+                }
+            }
+            """,
+            expandedSource: """
+            final class S {
+                func price(id: Int) async throws -> Int {
+                    id
+                }
+            }
+            """,
+            diagnostics: [
+                DiagnosticSpec(
+                    message:
+                        "namespace: 'hot-prices' contains '-'. Use lowercase letters, digits, underscores and dots: the namespace becomes the config key cache.namespaces.hot-prices, and Flight's environment overrides render that as FLIGHT_CACHE_NAMESPACES_… — anything else produces a variable name a shell cannot set, so the TTL silently cannot be configured.",
+                    line: 2, column: 27)
+            ],
+            macroSpecs: testMacros
+        )
+    }
+
+    @Test("an empty namespace is refused")
+    func emptyNamespaceIsRefused() {
+        assertMacroExpansion(
+            """
+            final class S {
+                @Cacheable(namespace: "")
+                func price(id: Int) async throws -> Int {
+                    id
+                }
+            }
+            """,
+            expandedSource: """
+            final class S {
+                func price(id: Int) async throws -> Int {
+                    id
+                }
+            }
+            """,
+            diagnostics: [
+                DiagnosticSpec(
+                    message:
+                        "namespace: is empty — it is this entry's cache identity and its config key.",
+                    line: 2, column: 27)
+            ],
+            macroSpecs: testMacros
+        )
+    }
+
+    @Test("the unnamed-parameter diagnostic gives advice that works")
+    func unnamedParameterAdviceIsSatisfiable() {
+        // It used to say "add it to excluding: by its external label", but
+        // matching is by *internal* name and `_` is the absence of one — so
+        // following the advice produced a second error rather than a fix.
+        assertMacroExpansion(
+            """
+            final class S {
+                @Cacheable(namespace: "prices")
+                func price(_: Int) async throws -> Int {
+                    0
+                }
+            }
+            """,
+            expandedSource: """
+            final class S {
+                func price(_: Int) async throws -> Int {
+                    0
+                }
+            }
+            """,
+            diagnostics: [
+                DiagnosticSpec(
+                    message:
+                        "@Cacheable cannot key on a parameter with no internal name. Give it one — `func f(_ id: Int)` rather than `func f(_: Int)` — since both keying on it and excluding it are by internal name.",
+                    line: 3, column: 16)
+            ],
+            macroSpecs: testMacros
+        )
+    }
 }

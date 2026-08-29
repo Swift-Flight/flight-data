@@ -10,10 +10,12 @@ import PostgresNIO
 /// - Schemes: `postgres` or `postgresql`.
 /// - Port defaults to 5432; user to `postgres`; password to none.
 /// - `sslmode`: `disable`, `prefer` (default), or `require` — the libpq
-///   subset that maps onto PostgresNIO's three TLS modes. The stricter
-///   libpq modes (`verify-ca`, `verify-full`) need certificate
-///   configuration that doesn't fit in a URL; configure those by
-///   constructing `PostgresConnection.Configuration` yourself.
+///   subset that maps onto PostgresNIO's three TLS modes. The stricter libpq
+///   modes (`verify-ca`, `verify-full`) need a CA bundle, which does not fit
+///   in a URL; so does a unix domain socket. Both go through
+///   `PostgresDataSource(name:configuration:…)`, which takes a
+///   `PostgresConnection.Configuration` you built yourself. That initializer
+///   did not exist while this sentence recommended it.
 ///
 /// Parsing is eager and loud: a malformed URL throws during `freeze()`'s
 /// singleton construction, failing bootstrap before any request is served.
