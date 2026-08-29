@@ -9,23 +9,29 @@ public struct CacheKey: Sendable, Hashable {
     /// Stable representations of the key-contributing arguments.
     public let parts: [String]
 
-    public init(namespace: String, parts: [String]) {
-        self.namespace = namespace
-        self.parts = parts
-    }
-
     /// The single-string form adapters key their storage by. Injective and
     /// prefix-safe: every segment is escaped (`\` → `\\`, `:` → `\:`,
     /// the empty segment → `\e`) and segments join with `:`, so
     /// `["ab","c"]`/`["a","bc"]` cannot collide and an escaped segment can
     /// never contain a raw `:` — which makes `storagePrefix(namespace:)` an
     /// unambiguous namespace prefix.
-    public var storageKey: String {
+    ///
+    /// Rendered once at construction. The key is immutable and every miss
+    /// asks for this several times over — the store lookup, the flight key,
+    /// the store write, and any log line — so re-escaping it each time was
+    /// paying for the same string four times on the path that is already the
+    /// slow one.
+    public let storageKey: String
+
+    public init(namespace: String, parts: [String]) {
+        self.namespace = namespace
+        self.parts = parts
         var rendered = Self.escape(namespace)
         rendered += ":"
         rendered += parts.map(Self.escape).joined(separator: ":")
-        return rendered
+        self.storageKey = rendered
     }
+
 
     /// The prefix every `storageKey` in `namespace` starts with — and that
     /// no other namespace's keys can start with. The Valkey adapter's

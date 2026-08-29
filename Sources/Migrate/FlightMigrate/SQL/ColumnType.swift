@@ -1,5 +1,3 @@
-import Foundation
-
 /// A Postgres column type as rendered into DDL.
 ///
 /// The provided constructors cover the common types; anything else is `.custom("...")`.

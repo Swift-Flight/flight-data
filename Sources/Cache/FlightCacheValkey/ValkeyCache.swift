@@ -100,11 +100,15 @@ public final class ValkeyCache: Cache, Sendable {
 
     public func set(_ key: CacheKey, value: Data, ttl: Duration?) async {
         guard breaker.admit() else { return }
+        // A TTL that has already run out is not a set with a negative expiry —
+        // that would tell the server to delete the key — it is a value not
+        // worth caching. Nothing to do, locally, without a round trip.
+        if let ttl, ttl.wholeMillisecondsIfPositive == nil { return }
         do {
             try await client.set(
                 storageKey(key),
                 value: value,
-                expiration: ttl.map { .milliseconds($0.wholeMilliseconds) }
+                expiration: ttl.flatMap { $0.wholeMillisecondsIfPositive }.map { .milliseconds($0) }
             )
             breaker.recordSuccess()
         } catch {
@@ -334,14 +338,22 @@ public final class ValkeyCache: Cache, Sendable {
 }
 
 extension Duration {
-    /// Whole milliseconds for `PX`, clamped up so a positive
-    /// sub-millisecond TTL never becomes "delete now" — the same rule as
-    /// Flight Data Valkey's delta V3.
-    var wholeMilliseconds: Int {
-        let milliseconds = components.seconds * 1000 + Int64(components.attoseconds / 1_000_000_000_000_000)
-        if milliseconds <= 0 && components.attoseconds > 0 {
-            return 1
-        }
-        return Int(milliseconds)
+    /// Whole milliseconds for `PX`, clamped up so a positive sub-millisecond
+    /// TTL never becomes "delete now" — the same rule as Flight Data Valkey's
+    /// delta V3.
+    ///
+    /// `nil` for a duration that is not positive. A negative TTL means the
+    /// caller's arithmetic ran off the end of a deadline that has already
+    /// passed, and `PX` with a negative timeout **deletes the key**: the guard
+    /// used to test `attoseconds > 0`, which a negative duration passes
+    /// (`-0.5s` is seconds `0`, attoseconds negative — and `-1.5s` is seconds
+    /// `-1`, attoseconds `-5e17`, so the sign lives in whichever component is
+    /// non-zero). The result went to the server and the set failed open per
+    /// call instead of no-opping locally.
+    var wholeMillisecondsIfPositive: Int? {
+        guard self > .zero else { return nil }
+        let milliseconds =
+            components.seconds * 1000 + Int64(components.attoseconds / 1_000_000_000_000_000)
+        return milliseconds <= 0 ? 1 : Int(milliseconds)
     }
 }

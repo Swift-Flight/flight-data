@@ -100,8 +100,7 @@ public struct ValkeyMultiBatch: Sendable {
     /// turning a TTL into a deletion. The direct `expire(_:after:)` refuses
     /// outright, because it can.
     public mutating func expire(_ key: ValkeyKey, after duration: Duration) {
-        let milliseconds = max(1, duration.wholeMilliseconds)
-        add(PEXPIRE(key, milliseconds: milliseconds))
+        add(PEXPIRE(key, milliseconds: duration > .zero ? duration.wholeMilliseconds : 1))
     }
 
     public mutating func persist(_ key: ValkeyKey) {
@@ -179,11 +178,26 @@ public struct ValkeyMultiResults: Sendable, RandomAccessCollection {
 extension Duration {
     /// Whole milliseconds, for `PEXPIRE`. Clamped up to 1ms — a positive
     /// sub-millisecond TTL must not become "delete immediately".
+    ///
+    /// Only defined for a positive duration: the callers refuse a non-positive
+    /// expiry outright, because `PEXPIRE` with a negative timeout deletes the
+    /// key and that must never happen by accident from arithmetic against a
+    /// deadline that has already passed.
+    ///
+    /// Saturating rather than trapping. A `Duration` can hold far more
+    /// milliseconds than an `Int` on a 32-bit platform, and `.seconds(Int.max)`
+    /// — reachable from a caller's own arithmetic — overflowed the multiply.
+    /// A TTL clamped to `Int.max` milliseconds is 292 million years; nobody is
+    /// harmed by the difference, and everybody is harmed by a crash.
     var wholeMilliseconds: Int {
-        let milliseconds = components.seconds * 1000 + Int64(components.attoseconds / 1_000_000_000_000_000)
-        if milliseconds <= 0 && components.attoseconds > 0 {
-            return 1
+        precondition(self > .zero, "wholeMilliseconds is only meaningful for a positive duration")
+        let milliseconds =
+            components.seconds.multipliedReportingOverflow(by: 1000).partialValue
+            &+ Int64(components.attoseconds / 1_000_000_000_000_000)
+        if components.seconds.multipliedReportingOverflow(by: 1000).overflow {
+            return Int.max
         }
-        return Int(milliseconds)
+        if milliseconds <= 0 { return 1 }
+        return milliseconds > Int64(Int.max) ? Int.max : Int(milliseconds)
     }
 }

@@ -34,6 +34,10 @@ public macro CacheEvict(namespace: String, allEntries: Bool = false, excluding: 
 /// Always call the body, then overwrite the cached value. Distinct from
 /// `@Cacheable`: it never short-circuits. Remember `excluding:` for the
 /// new-value parameter — it is not part of the entry's identity.
+///
+/// A body returning `nil` **evicts** the entry. "Always overwrites" has to
+/// hold for the nil case too, or a method that removed something would leave
+/// the thing it removed in the cache for the next reader.
 @attached(body)
 public macro CachePut(namespace: String, ttl: Duration? = nil, excluding: [String] = []) =
     #externalMacro(module: "FlightCacheMacrosImpl", type: "CachePutMacro")

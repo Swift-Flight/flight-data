@@ -146,9 +146,13 @@ enum CacheMacroSupport {
         for parameter in function.signature.parameterClause.parameters {
             let internalName = (parameter.secondName ?? parameter.firstName).text
             if internalName == "_" {
+                // Deliberately not "add it to excluding:": matching is by
+                // internal name, and `_` is exactly the absence of one — so
+                // that advice sent the reader to a second error rather than a
+                // fix. Naming the parameter is the only way out.
                 context.diagnoseError(
                     "cache.unnamedparameter",
-                    "@\(macroName) cannot key on a parameter with no internal name — name it, or add it to excluding: by its external label.",
+                    "@\(macroName) cannot key on a parameter with no internal name. Give it one — `func f(_ id: Int)` rather than `func f(_: Int)` — since both keying on it and excluding it are by internal name.",
                     at: parameter)
                 return nil
             }

@@ -168,6 +168,14 @@ public final class CacheRuntime: Sendable {
 
     /// Always overwrite: the annotated body has already run; store its
     /// result. Never short-circuits, never coalesces.
+    ///
+    /// A `nil` result **evicts** rather than being skipped. `storeIfCacheable`
+    /// declines to cache absence, which is right for `@Cacheable` — a lookup
+    /// that found nothing should not be remembered as "nothing". Reusing it
+    /// here meant a put whose new value was nil neither overwrote nor removed,
+    /// so the *previous* value stayed and the next `@Cacheable` read served it:
+    /// a method that had just deleted a row handed the old row back, from an
+    /// annotation whose entire promise is that it always overwrites.
     public func cachePut<Value: Codable & Sendable>(
         namespace: String,
         parts: [String],
@@ -175,6 +183,11 @@ public final class CacheRuntime: Sendable {
         value: Value
     ) async {
         let key = CacheKey(namespace: namespace, parts: parts)
+        if case Optional<Any>.none = (value as Any) {
+            await store.evict(key)
+            counters(for: namespace).evictions.increment()
+            return
+        }
         if await storeIfCacheable(value, key: key, namespace: namespace, annotationTTL: ttl) != nil {
             counters(for: namespace).puts.increment()
         }

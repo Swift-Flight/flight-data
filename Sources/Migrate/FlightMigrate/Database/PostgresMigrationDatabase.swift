@@ -95,8 +95,17 @@ struct PostgresMigrationSession: MigrationSession {
     }
 
     func migrationsTableExists(_ table: String) async throws -> Bool {
+        // `to_regclass` *parses* its argument as an identifier, so it has to be
+        // given the same rendering the DDL uses. Passing the raw configured
+        // name meant an unquoted parse — which case-folds — against a table
+        // created quoted: `--migrations-table Ledger` created `"Ledger"` and
+        // then looked for `ledger`, found nothing, and answered "no ledger
+        // here" forever. `migrate()` worked (it creates `IF NOT EXISTS` and
+        // writes), while `status()` showed everything pending, `rollback()`
+        // said there was nothing to roll back, and `repair()` had nothing to
+        // repair — against a table full of applied rows.
         let rows = try await connection.query(
-            "SELECT to_regclass(\(table)) IS NOT NULL", logger: logger)
+            "SELECT to_regclass(\(SQL.identifier(table))) IS NOT NULL", logger: logger)
         for try await exists in rows.decode(Bool.self) {
             return exists
         }

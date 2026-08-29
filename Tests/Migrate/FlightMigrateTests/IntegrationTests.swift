@@ -277,6 +277,51 @@ struct IntegrationTests {
         }
     }
 
+    /// A ledger whose name needs quoting.
+    ///
+    /// `to_regclass` parses its argument as an identifier, and the existence
+    /// check was handing it the raw configured name while the DDL rendered it
+    /// quoted. So `--migrations-table Ledger` created `"Ledger"` and then
+    /// asked about `ledger`: `migrate()` worked, because it creates
+    /// `IF NOT EXISTS` and writes — and everything that *reads* the ledger
+    /// through the existence check saw an empty one. Status showed every
+    /// migration pending while migrate said up-to-date, and rollback reported
+    /// nothing to roll back against a table full of applied rows.
+    @Test func aQuoteRequiringLedgerNameIsFoundByEveryCommand() async throws {
+        try await withTestClient { client in
+            // Mixed case is the common way to trip this: unquoted parsing
+            // case-folds, quoted DDL does not.
+            let ledger = "IT_Ledger_MixedCase_\(testRunSuffix)"
+            let quoted = SQL.identifier(ledger)
+            let tables = ["it_users"]
+            try await exec(client, "DROP TABLE IF EXISTS \(quoted) CASCADE")
+            for table in tables {
+                try await exec(client, "DROP TABLE IF EXISTS \(table) CASCADE")
+            }
+
+            let migrations = [entry(1, "ITCreateUsers", ITCreateUsers.self)]
+            let migrator = FlightMigrator(
+                client: client, migrations: migrations,
+                configuration: testConfiguration(ledger: ledger))
+
+            #expect(try await migrator.migrate().map(\.version) == [1])
+            #expect(try await scalarInt(client, "SELECT count(*) FROM \(quoted)") == 1)
+
+            // Each of these consults the existence check first, and each used
+            // to see a ledger that was not there.
+            let status = try await migrator.status()
+            #expect(status.isUpToDate, "status must see the rows migrate just wrote")
+            #expect(status.applied.map(\.version) == [1])
+            #expect(try await migrator.planMigrate().steps.isEmpty, "nothing is pending")
+            #expect(try await migrator.rollback().map(\.version) == [1])
+
+            try await exec(client, "DROP TABLE IF EXISTS \(quoted) CASCADE")
+            for table in tables {
+                try await exec(client, "DROP TABLE IF EXISTS \(table) CASCADE")
+            }
+        }
+    }
+
     @Test func failedWrappedMigrationLeavesNoTrace() async throws {
         try await withTestClient { client in
             let ledger = scopedLedger("atomic")

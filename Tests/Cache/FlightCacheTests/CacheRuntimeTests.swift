@@ -143,6 +143,36 @@ struct CacheRuntimeTests {
         #expect(value == 2)
     }
 
+    @Test("cachePut of nil evicts rather than leaving the old value")
+    func putOfNilEvicts() async throws {
+        let store = RecordingCache()
+        let runtime = try runtime(store: store)
+        let key = CacheKey(namespace: "prices", parts: ["1"])
+
+        _ = try await runtime.cacheable(
+            namespace: "prices", parts: ["1"], ttl: nil, as: Int?.self
+        ) { 1 }
+        #expect(store.data(for: key) == Data("1".utf8))
+
+        // "Always overwrites" has to hold for nil too. It used to route
+        // through the same don't-cache-absence rule `@Cacheable` needs, so the
+        // put neither overwrote nor removed — and the read below served 1,
+        // from a method that had just returned nothing.
+        await runtime.cachePut(
+            namespace: "prices", parts: ["1"], ttl: nil, value: Int?.none)
+        #expect(store.data(for: key) == nil, "the stale value must be gone")
+
+        var bodyRan = false
+        let value = try await runtime.cacheable(
+            namespace: "prices", parts: ["1"], ttl: nil, as: Int?.self
+        ) {
+            bodyRan = true
+            return nil
+        }
+        #expect(bodyRan, "the entry is gone, so the next read must recompute")
+        #expect(value == nil)
+    }
+
     @Test("evict removes one entry; allEntries evicts the namespace")
     func evict() async throws {
         let store = RecordingCache()
